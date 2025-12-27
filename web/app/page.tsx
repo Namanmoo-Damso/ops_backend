@@ -1100,8 +1100,8 @@ const RoomShell = ({
 
 export default function Home() {
   const lanHostEnv = process.env.NEXT_PUBLIC_LAN_IP ?? "";
-  const apiPortEnv = process.env.NEXT_PUBLIC_API_PORT ?? "8080";
-  const livekitPortEnv = process.env.NEXT_PUBLIC_LIVEKIT_PORT ?? "7882";
+  const apiPortEnv = process.env.NEXT_PUBLIC_API_PORT || "8080";
+  const livekitPortEnv = process.env.NEXT_PUBLIC_LIVEKIT_PORT || "7882";
   const apiBaseEnv =
     process.env.NEXT_PUBLIC_API_BASE ??
     (lanHostEnv ? `http://${lanHostEnv}:${apiPortEnv}` : "");
