@@ -59,6 +59,7 @@ export class AppController {
       identity?: string;
       name?: string;
       role?: 'host' | 'viewer' | 'observer';
+      livekitUrl?: string;
       apnsToken?: string;
       voipToken?: string;
       platform?: string;
@@ -104,11 +105,16 @@ export class AppController {
       throw new HttpException('invalid role', HttpStatus.BAD_REQUEST);
     }
 
+    const livekitUrlOverride = this.normalizeLivekitUrl(body.livekitUrl);
+    if (body.livekitUrl && !livekitUrlOverride) {
+      throw new HttpException('invalid livekitUrl', HttpStatus.BAD_REQUEST);
+    }
+
     this.logger.log(
-      `rtcToken room=${roomName} identity=${identity} role=${role} env=${body.env ?? 'default'} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
+      `rtcToken room=${roomName} identity=${identity} role=${role} env=${body.env ?? 'default'} livekit=${livekitUrlOverride ?? 'default'} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
     );
 
-    return await this.appService.issueRtcToken({
+    const rtcData = await this.appService.issueRtcToken({
       roomName,
       identity,
       name,
@@ -123,6 +129,10 @@ export class AppController {
             }
           : undefined,
     });
+    return {
+      ...rtcData,
+      livekitUrl: livekitUrlOverride ?? rtcData.livekitUrl,
+    };
   }
 
   @Post('/v1/devices/register')
@@ -338,6 +348,21 @@ export class AppController {
     if (!token) return 'none';
     const suffix = token.slice(-6);
     return `len=${token.length}..${suffix}`;
+  }
+
+  private normalizeLivekitUrl(value?: string) {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== 'wss:' && url.protocol !== 'ws:') {
+        return undefined;
+      }
+      return trimmed;
+    } catch {
+      return undefined;
+    }
   }
 
   private summarizePayloadKeys(payload?: Record<string, unknown>) {
