@@ -71,6 +71,18 @@ const parseNumber = (value: string | undefined, fallback: number): number => {
   return parsed;
 };
 
+const resolveLivekitUrl = (): string => {
+  const explicit = process.env.LIVEKIT_URL;
+  if (explicit) return explicit;
+  const lanIp = process.env.LAN_IP;
+  if (!lanIp) {
+    throw new Error('Missing required env: LIVEKIT_URL or LAN_IP');
+  }
+  const scheme = process.env.LIVEKIT_SCHEME ?? 'ws';
+  const port = process.env.LIVEKIT_PORT ?? '7882';
+  return `${scheme}://${lanIp}:${port}`;
+};
+
 let cachedConfig: AppConfig | null = null;
 const getConfig = (): AppConfig => {
   if (cachedConfig) return cachedConfig;
@@ -79,7 +91,7 @@ const getConfig = (): AppConfig => {
     apnsModeRaw === 'both' ? 'both' : apnsModeRaw === 'sandbox' ? 'sandbox' : 'prod';
   cachedConfig = {
     port: parseNumber(process.env.PORT, 8080),
-    livekitUrl: getEnv('LIVEKIT_URL'),
+    livekitUrl: resolveLivekitUrl(),
     livekitApiKey: getEnv('LIVEKIT_API_KEY'),
     livekitApiSecret: getEnv('LIVEKIT_API_SECRET'),
     livekitTokenTtlSeconds: parseNumber(process.env.LIVEKIT_TOKEN_TTL, 600),

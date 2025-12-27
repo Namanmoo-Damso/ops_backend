@@ -1099,8 +1099,15 @@ const RoomShell = ({
 };
 
 export default function Home() {
-  const apiBaseEnv = process.env.NEXT_PUBLIC_API_BASE ?? "";
-  const livekitEnv = process.env.NEXT_PUBLIC_LIVEKIT_URL ?? "";
+  const lanHostEnv = process.env.NEXT_PUBLIC_LAN_IP ?? "";
+  const apiPortEnv = process.env.NEXT_PUBLIC_API_PORT ?? "8080";
+  const livekitPortEnv = process.env.NEXT_PUBLIC_LIVEKIT_PORT ?? "7882";
+  const apiBaseEnv =
+    process.env.NEXT_PUBLIC_API_BASE ??
+    (lanHostEnv ? `http://${lanHostEnv}:${apiPortEnv}` : "");
+  const livekitEnv =
+    process.env.NEXT_PUBLIC_LIVEKIT_URL ??
+    (lanHostEnv ? `ws://${lanHostEnv}:${livekitPortEnv}` : "");
   const defaultRoom = process.env.NEXT_PUBLIC_ROOM_NAME ?? "demo-room";
 
   const [apiBase, setApiBase] = useState(apiBaseEnv);
@@ -1122,9 +1129,27 @@ export default function Home() {
       return;
     }
     if (typeof window !== "undefined") {
+      const hostname = window.location.hostname;
+      if (hostname) {
+        setApiBase(`http://${hostname}:${apiPortEnv}`);
+        return;
+      }
       setApiBase(window.location.origin);
     }
-  }, [apiBaseEnv]);
+  }, [apiBaseEnv, apiPortEnv]);
+
+  useEffect(() => {
+    if (livekitEnv) {
+      setServerUrl(livekitEnv);
+      return;
+    }
+    if (typeof window !== "undefined") {
+      const hostname = window.location.hostname;
+      if (hostname) {
+        setServerUrl(`ws://${hostname}:${livekitPortEnv}`);
+      }
+    }
+  }, [livekitEnv, livekitPortEnv]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1143,12 +1168,26 @@ export default function Home() {
     }
   }, []);
 
+  const resolveApiBase = () => {
+    if (apiBase) return apiBase;
+    if (typeof window === "undefined") return apiBaseEnv;
+    const hostname = window.location.hostname;
+    return hostname ? `http://${hostname}:${apiPortEnv}` : window.location.origin;
+  };
+
+  const resolveLivekitUrl = () => {
+    if (livekitEnv) return livekitEnv;
+    if (typeof window === "undefined") return "";
+    const hostname = window.location.hostname;
+    return hostname ? `ws://${hostname}:${livekitPortEnv}` : "";
+  };
+
   const joinRoom = async () => {
     if (connecting || connected) return;
     setConnecting(true);
     setError(null);
     try {
-      const apiBaseResolved = apiBase || window.location.origin;
+      const apiBaseResolved = resolveApiBase();
       const authRes = await fetch(`${apiBaseResolved}/v1/auth/anonymous`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1180,7 +1219,7 @@ export default function Home() {
         throw new Error("RTC token missing");
       }
       setToken(rtcData.token);
-      setServerUrl(rtcData.livekitUrl || livekitEnv);
+      setServerUrl(rtcData.livekitUrl || resolveLivekitUrl());
       setConnected(true);
     } catch (error) {
       console.error(error);
@@ -1193,7 +1232,7 @@ export default function Home() {
   const leaveRoom = () => {
     setConnected(false);
     setToken("");
-    setServerUrl(livekitEnv);
+    setServerUrl(resolveLivekitUrl());
     setFocusedId(null);
   };
 
@@ -1211,7 +1250,7 @@ export default function Home() {
     setInviteBusy(true);
     setInviteStatus(null);
     try {
-      const apiBaseResolved = apiBase || window.location.origin;
+      const apiBaseResolved = resolveApiBase();
       const res = await fetch(`${apiBaseResolved}/v1/calls/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
