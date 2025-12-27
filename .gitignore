@@ -1,3 +1,8 @@
+.env
+*.env
+.env.local
+.env.*.local
+livekit.yaml
 secrets/
 *.p8
 
@@ -23,3 +28,6 @@ DerivedData/
 *.xcuserstate
 *.xcuserdata/
 .DS_Store
+
+# Logs
+*.log
