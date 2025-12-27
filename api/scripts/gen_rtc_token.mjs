@@ -5,24 +5,12 @@ const identity = process.argv[3] || `user-${Date.now()}`;
 const name = process.argv[4] || identity;
 const role = process.argv[5] || 'host';
 
-const resolveLivekitUrl = () => {
-  const explicit = process.env.LIVEKIT_URL;
-  if (explicit) return explicit;
-  const lanIp = process.env.LAN_IP;
-  if (!lanIp) return undefined;
-  const scheme = process.env.LIVEKIT_SCHEME ?? 'ws';
-  const port = process.env.LIVEKIT_PORT ?? '7882';
-  return `${scheme}://${lanIp}:${port}`;
-};
-
-const livekitUrl = resolveLivekitUrl();
+const livekitUrl = process.env.LIVEKIT_URL;
 const apiKey = process.env.LIVEKIT_API_KEY;
 const apiSecret = process.env.LIVEKIT_API_SECRET;
 
 if (!livekitUrl || !apiKey || !apiSecret) {
-  console.error(
-    'Missing LIVEKIT_URL (or LAN_IP), LIVEKIT_API_KEY, or LIVEKIT_API_SECRET',
-  );
+  console.error('Missing LIVEKIT_URL, LIVEKIT_API_KEY, or LIVEKIT_API_SECRET');
   process.exit(1);
 }
 

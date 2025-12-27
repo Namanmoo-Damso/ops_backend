@@ -56,8 +56,6 @@ services:
       context: ./api
     env_file:
       - ./api.env
-    environment:
-      - LAN_IP=${LAN_IP}
     volumes:
       - ./secrets:/secrets:ro
     depends_on:
@@ -66,24 +64,16 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   web:
     build:
       context: ./web
-      args:
-        NEXT_PUBLIC_LAN_IP: ${LAN_IP}
-        NEXT_PUBLIC_API_PORT: "8080"
-        NEXT_PUBLIC_LIVEKIT_PORT: "7882"
     env_file:
       - ./web.env
-    environment:
-      - NEXT_PUBLIC_LAN_IP=${LAN_IP}
-      - NEXT_PUBLIC_API_PORT=8080
-      - NEXT_PUBLIC_LIVEKIT_PORT=7882
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     restart: unless-stopped
 
 volumes:
