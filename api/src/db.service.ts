@@ -1,10 +1,55 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
 
+type UserType = 'guardian' | 'ward' | null;
+
 type UserRow = {
   id: string;
   identity: string;
   display_name: string | null;
+  user_type: UserType;
+  email: string | null;
+  nickname: string | null;
+  profile_image_url: string | null;
+  kakao_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type GuardianRow = {
+  id: string;
+  user_id: string;
+  ward_email: string;
+  ward_phone_number: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type WardRow = {
+  id: string;
+  user_id: string;
+  phone_number: string;
+  guardian_id: string | null;
+  organization_id: string | null;
+  ai_persona: string;
+  weekly_call_count: number;
+  call_duration_minutes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type OrganizationRow = {
+  id: string;
+  name: string;
+  created_at: string;
+};
+
+type RefreshTokenRow = {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  created_at: string;
 };
 
 type DeviceRow = {
@@ -62,11 +107,12 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
   async upsertUser(identity: string, displayName?: string) {
     const result = await this.pool.query<UserRow>(
-      `insert into users (identity, display_name)
-       values ($1, $2)
+      `insert into users (identity, display_name, updated_at)
+       values ($1, $2, now())
        on conflict (identity)
-       do update set display_name = excluded.display_name
-       returning id, identity, display_name`,
+       do update set display_name = coalesce(excluded.display_name, users.display_name),
+         updated_at = now()
+       returning id, identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, created_at, updated_at`,
       [identity, displayName ?? null],
     );
     return result.rows[0];
@@ -191,7 +237,8 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
   }) {
     const tokenColumn = params.tokenType === 'voip' ? 'voip_token' : 'apns_token';
     const result = await this.pool.query<UserRow>(
-      `select u.id, u.identity, u.display_name
+      `select u.id, u.identity, u.display_name, u.user_type, u.email, u.nickname,
+              u.profile_image_url, u.kakao_id, u.created_at, u.updated_at
        from devices d
        join users u on d.user_id = u.id
        where d.${tokenColumn} = $1
@@ -329,5 +376,120 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       [callId, state],
     );
     return result.rows[0];
+  }
+
+  // ============================================================
+  // Auth related methods
+  // ============================================================
+
+  async findUserByKakaoId(kakaoId: string) {
+    const result = await this.pool.query<UserRow>(
+      `select id, identity, display_name, user_type, email, nickname,
+              profile_image_url, kakao_id, created_at, updated_at
+       from users
+       where kakao_id = $1
+       limit 1`,
+      [kakaoId],
+    );
+    return result.rows[0];
+  }
+
+  async findUserById(userId: string) {
+    const result = await this.pool.query<UserRow>(
+      `select id, identity, display_name, user_type, email, nickname,
+              profile_image_url, kakao_id, created_at, updated_at
+       from users
+       where id = $1
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0];
+  }
+
+  async findGuardianByWardEmail(wardEmail: string) {
+    const result = await this.pool.query<GuardianRow>(
+      `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
+       from guardians
+       where ward_email = $1
+       limit 1`,
+      [wardEmail],
+    );
+    return result.rows[0];
+  }
+
+  async createUserWithKakao(params: {
+    kakaoId: string;
+    email: string | null;
+    nickname: string | null;
+    profileImageUrl: string | null;
+    userType: 'guardian' | 'ward';
+  }) {
+    const identity = `kakao_${params.kakaoId}`;
+    const result = await this.pool.query<UserRow>(
+      `insert into users (identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, now())
+       returning id, identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, created_at, updated_at`,
+      [
+        identity,
+        params.nickname,
+        params.userType,
+        params.email,
+        params.nickname,
+        params.profileImageUrl,
+        params.kakaoId,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async createWard(params: {
+    userId: string;
+    phoneNumber: string;
+    guardianId: string | null;
+  }) {
+    const result = await this.pool.query<WardRow>(
+      `insert into wards (user_id, phone_number, guardian_id, updated_at)
+       values ($1, $2, $3, now())
+       returning id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at`,
+      [params.userId, params.phoneNumber, params.guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async saveRefreshToken(params: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+  }) {
+    await this.pool.query(
+      `insert into refresh_tokens (user_id, token_hash, expires_at)
+       values ($1, $2, $3)`,
+      [params.userId, params.tokenHash, params.expiresAt.toISOString()],
+    );
+  }
+
+  async findRefreshToken(tokenHash: string) {
+    const result = await this.pool.query<RefreshTokenRow>(
+      `select id, user_id, token_hash, expires_at, created_at
+       from refresh_tokens
+       where token_hash = $1 and expires_at > now()
+       limit 1`,
+      [tokenHash],
+    );
+    return result.rows[0];
+  }
+
+  async deleteRefreshToken(tokenHash: string) {
+    await this.pool.query(
+      `delete from refresh_tokens where token_hash = $1`,
+      [tokenHash],
+    );
+  }
+
+  async deleteUserRefreshTokens(userId: string) {
+    await this.pool.query(
+      `delete from refresh_tokens where user_id = $1`,
+      [userId],
+    );
   }
 }
