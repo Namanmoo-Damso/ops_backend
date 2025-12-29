@@ -61,6 +61,29 @@ export class AppController {
     }
   }
 
+  @Post('/v1/auth/refresh')
+  async authRefresh(@Body() body: { refreshToken?: string }) {
+    const refreshToken = body.refreshToken?.trim();
+    if (!refreshToken) {
+      throw new HttpException('refreshToken is required', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      this.logger.log('authRefresh');
+      const tokens = await this.authService.refreshTokens(refreshToken);
+      return tokens;
+    } catch (error) {
+      if ((error as HttpException).getStatus?.() === HttpStatus.UNAUTHORIZED) {
+        throw error;
+      }
+      this.logger.warn(`authRefresh failed error=${(error as Error).message}`);
+      throw new HttpException(
+        (error as Error).message || 'Token refresh failed',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+  }
+
   @Get('/v1/rooms/:roomName/members')
   async listRoomMembers(
     @Headers('authorization') authorization: string | undefined,
