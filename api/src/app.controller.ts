@@ -16,6 +16,7 @@ import { AppService } from './app.service';
 import { AuthService } from './auth.service';
 import { DbService } from './db.service';
 import { NotificationScheduler } from './notification.scheduler';
+import { AiService } from './ai.service';
 
 @Controller()
 export class AppController {
@@ -26,6 +27,7 @@ export class AppController {
     private readonly authService: AuthService,
     private readonly dbService: DbService,
     private readonly notificationScheduler: NotificationScheduler,
+    private readonly aiService: AiService,
   ) {}
 
   @Get('/healthz')
@@ -1105,6 +1107,36 @@ export class AppController {
     });
 
     return result;
+  }
+
+  @Post('/v1/calls/:callId/analyze')
+  async analyzeCall(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('callId') callId: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!callId?.trim()) {
+      throw new HttpException('callId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    this.logger.log(`analyzeCall callId=${callId}`);
+
+    try {
+      const result = await this.aiService.analyzeCall(callId);
+      return result;
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('not found')) {
+        throw new HttpException('Call not found', HttpStatus.NOT_FOUND);
+      }
+      this.logger.error(`analyzeCall failed callId=${callId} error=${message}`);
+      throw new HttpException('Failed to analyze call', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 
   private summarizeToken(token?: string) {
