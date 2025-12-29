@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpException,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { AppService } from './app.service';
 import { AuthService } from './auth.service';
+import { DbService } from './db.service';
 
 @Controller()
 export class AppController {
@@ -19,6 +21,7 @@ export class AppController {
   constructor(
     private readonly appService: AppService,
     private readonly authService: AuthService,
+    private readonly dbService: DbService,
   ) {}
 
   @Get('/healthz')
@@ -141,6 +144,134 @@ export class AppController {
         HttpStatus.BAD_REQUEST,
       );
     }
+  }
+
+  @Get('/v1/users/me')
+  async getMe(@Headers('authorization') authorization: string | undefined) {
+    // Access token 검증
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user) {
+        throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`getMe userId=${user.id}`);
+
+      const baseResponse = {
+        id: user.id,
+        email: user.email,
+        nickname: user.nickname,
+        profileImageUrl: user.profile_image_url,
+        userType: user.user_type,
+        createdAt: user.created_at,
+      };
+
+      if (user.user_type === 'guardian') {
+        const guardian = await this.dbService.findGuardianByUserId(user.id);
+        const linkedWard = guardian
+          ? await this.dbService.findWardByGuardianId(guardian.id)
+          : undefined;
+
+        return {
+          ...baseResponse,
+          guardianInfo: guardian
+            ? {
+                id: guardian.id,
+                wardEmail: guardian.ward_email,
+                wardPhoneNumber: guardian.ward_phone_number,
+                linkedWard: linkedWard
+                  ? {
+                      id: linkedWard.user_id,
+                      nickname: linkedWard.user_nickname,
+                      profileImageUrl: linkedWard.user_profile_image_url,
+                    }
+                  : null,
+              }
+            : null,
+        };
+      } else if (user.user_type === 'ward') {
+        const ward = await this.dbService.findWardByUserId(user.id);
+        const linkedGuardian = ward?.guardian_id
+          ? await this.dbService.findGuardianById(ward.guardian_id)
+          : undefined;
+
+        return {
+          ...baseResponse,
+          wardInfo: ward
+            ? {
+                id: ward.id,
+                phoneNumber: ward.phone_number,
+                aiPersona: ward.ai_persona,
+                weeklyCallCount: ward.weekly_call_count,
+                callDurationMinutes: ward.call_duration_minutes,
+                linkedGuardian: linkedGuardian
+                  ? {
+                      id: linkedGuardian.user_id,
+                      nickname: linkedGuardian.user_nickname,
+                      profileImageUrl: linkedGuardian.user_profile_image_url,
+                    }
+                  : null,
+                linkedOrganization: null,
+              }
+            : null,
+        };
+      }
+
+      return baseResponse;
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getMe failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get user info', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Delete('/v1/users/me')
+  async deleteMe(@Headers('authorization') authorization: string | undefined) {
+    // Access token 검증
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user) {
+        throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`deleteMe userId=${user.id}`);
+      await this.dbService.deleteUser(user.id);
+
+      return {
+        success: true,
+        message: '회원탈퇴가 완료되었습니다.',
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`deleteMe failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to delete user', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  private verifyAuthHeader(authorization: string | undefined) {
+    const authHeader = authorization ?? '';
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : undefined;
+
+    if (!token) {
+      throw new HttpException('Authorization required', HttpStatus.UNAUTHORIZED);
+    }
+
+    const payload = this.authService.verifyAccessToken(token);
+    if (!payload) {
+      throw new HttpException('Invalid or expired token', HttpStatus.UNAUTHORIZED);
+    }
+
+    return payload;
   }
 
   @Get('/v1/rooms/:roomName/members')
