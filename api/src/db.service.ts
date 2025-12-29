@@ -588,4 +588,129 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       [userId],
     );
   }
+
+  // ============================================================
+  // Dashboard related methods
+  // ============================================================
+
+  async getWardCallStats(wardId: string) {
+    const result = await this.pool.query<{
+      total_calls: string;
+      avg_duration: string | null;
+    }>(
+      `select
+        count(*) as total_calls,
+        avg(extract(epoch from (c.ended_at - c.answered_at))/60) as avg_duration
+       from calls c
+       where c.callee_user_id = (select user_id from wards where id = $1)
+         and c.state = 'ended'
+         and c.answered_at is not null`,
+      [wardId],
+    );
+    return {
+      totalCalls: parseInt(result.rows[0]?.total_calls || '0', 10),
+      avgDuration: Math.round(parseFloat(result.rows[0]?.avg_duration || '0')),
+    };
+  }
+
+  async getWardWeeklyCallChange(wardId: string) {
+    const result = await this.pool.query<{ this_week: string; last_week: string }>(
+      `select
+        (select count(*) from calls c
+         where c.callee_user_id = (select user_id from wards where id = $1)
+           and c.state = 'ended'
+           and c.created_at >= now() - interval '7 days') as this_week,
+        (select count(*) from calls c
+         where c.callee_user_id = (select user_id from wards where id = $1)
+           and c.state = 'ended'
+           and c.created_at >= now() - interval '14 days'
+           and c.created_at < now() - interval '7 days') as last_week`,
+      [wardId],
+    );
+    const thisWeek = parseInt(result.rows[0]?.this_week || '0', 10);
+    const lastWeek = parseInt(result.rows[0]?.last_week || '0', 10);
+    return thisWeek - lastWeek;
+  }
+
+  async getWardMoodStats(wardId: string) {
+    const result = await this.pool.query<{ mood: string; count: string }>(
+      `select mood, count(*) as count
+       from call_summaries
+       where ward_id = $1
+         and mood is not null
+       group by mood`,
+      [wardId],
+    );
+    let positive = 0;
+    let negative = 0;
+    let neutral = 0;
+    for (const row of result.rows) {
+      const count = parseInt(row.count, 10);
+      if (row.mood === 'positive') positive = count;
+      else if (row.mood === 'negative') negative = count;
+      else neutral = count;
+    }
+    const total = positive + negative + neutral;
+    if (total === 0) {
+      return { positive: 0, negative: 0 };
+    }
+    return {
+      positive: Math.round((positive / total) * 100),
+      negative: Math.round((negative / total) * 100),
+    };
+  }
+
+  async getHealthAlerts(guardianId: string, limit: number = 5) {
+    const result = await this.pool.query<{
+      id: string;
+      alert_type: string;
+      message: string;
+      is_read: boolean;
+      created_at: string;
+    }>(
+      `select id, alert_type, message, is_read, created_at
+       from health_alerts
+       where guardian_id = $1
+       order by created_at desc
+       limit $2`,
+      [guardianId, limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      type: row.alert_type,
+      message: row.message,
+      date: row.created_at.split('T')[0],
+      isRead: row.is_read,
+    }));
+  }
+
+  async getRecentCallSummaries(wardId: string, limit: number = 5) {
+    const result = await this.pool.query<{
+      id: string;
+      call_id: string;
+      summary: string | null;
+      mood: string | null;
+      tags: string[] | null;
+      created_at: string;
+      call_duration: string | null;
+    }>(
+      `select
+        cs.id, cs.call_id, cs.summary, cs.mood, cs.tags, cs.created_at,
+        extract(epoch from (c.ended_at - c.answered_at))/60 as call_duration
+       from call_summaries cs
+       left join calls c on cs.call_id = c.call_id
+       where cs.ward_id = $1
+       order by cs.created_at desc
+       limit $2`,
+      [wardId, limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      date: row.created_at,
+      duration: Math.round(parseFloat(row.call_duration || '0')),
+      summary: row.summary || '',
+      tags: row.tags || [],
+      mood: row.mood || 'neutral',
+    }));
+  }
 }
