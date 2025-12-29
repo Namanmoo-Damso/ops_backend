@@ -256,6 +256,65 @@ export class AppController {
     }
   }
 
+  @Get('/v1/guardian/dashboard')
+  async getGuardianDashboard(@Headers('authorization') authorization: string | undefined) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      const linkedWard = await this.dbService.findWardByGuardianId(guardian.id);
+      if (!linkedWard) {
+        // 연결된 어르신이 없는 경우 빈 대시보드 반환
+        return {
+          statistics: {
+            totalCalls: 0,
+            weeklyChange: 0,
+            averageDuration: 0,
+            overallMood: { positive: 0, negative: 0 },
+          },
+          alerts: [],
+          recentCalls: [],
+        };
+      }
+
+      this.logger.log(`getGuardianDashboard guardianId=${guardian.id} wardId=${linkedWard.id}`);
+
+      const [stats, weeklyChange, moodStats, alerts, recentCalls] = await Promise.all([
+        this.dbService.getWardCallStats(linkedWard.id),
+        this.dbService.getWardWeeklyCallChange(linkedWard.id),
+        this.dbService.getWardMoodStats(linkedWard.id),
+        this.dbService.getHealthAlerts(guardian.id, 5),
+        this.dbService.getRecentCallSummaries(linkedWard.id, 5),
+      ]);
+
+      return {
+        statistics: {
+          totalCalls: stats.totalCalls,
+          weeklyChange,
+          averageDuration: stats.avgDuration,
+          overallMood: moodStats,
+        },
+        alerts,
+        recentCalls,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getGuardianDashboard failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get dashboard', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   private verifyAuthHeader(authorization: string | undefined) {
     const authHeader = authorization ?? '';
     const token = authHeader.startsWith('Bearer ')
