@@ -23,6 +23,7 @@
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^5.0.1",
     "apn": "^2.2.0",
     "jsonwebtoken": "^9.0.3",
     "livekit-server-sdk": "^2.15.0",

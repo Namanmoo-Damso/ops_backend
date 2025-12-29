@@ -15,6 +15,7 @@ import {
 import { AppService } from './app.service';
 import { AuthService } from './auth.service';
 import { DbService } from './db.service';
+import { NotificationScheduler } from './notification.scheduler';
 
 @Controller()
 export class AppController {
@@ -24,6 +25,7 @@ export class AppController {
     private readonly appService: AppService,
     private readonly authService: AuthService,
     private readonly dbService: DbService,
+    private readonly notificationScheduler: NotificationScheduler,
   ) {}
 
   @Get('/healthz')
@@ -1095,7 +1097,14 @@ export class AppController {
     }
 
     this.logger.log(`endCall callId=${callId}`);
-    return await this.appService.endCall(callId);
+    const result = await this.appService.endCall(callId);
+
+    // 비동기로 보호자에게 통화 완료 알림 전송
+    this.notificationScheduler.notifyCallComplete(callId).catch((error) => {
+      this.logger.warn(`endCall notifyCallComplete failed callId=${callId} error=${(error as Error).message}`);
+    });
+
+    return result;
   }
 
   private summarizeToken(token?: string) {
