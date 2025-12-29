@@ -713,4 +713,106 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       mood: row.mood || 'neutral',
     }));
   }
+
+  // ============================================================
+  // Report related methods
+  // ============================================================
+
+  async getEmotionTrend(wardId: string, days: number) {
+    const result = await this.pool.query<{
+      date: string;
+      score: string | null;
+      mood: string | null;
+    }>(
+      `select
+        to_char(created_at, 'YYYY-MM-DD') as date,
+        avg(mood_score) as score,
+        mode() within group (order by mood) as mood
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+       group by to_char(created_at, 'YYYY-MM-DD')
+       order by date`,
+      [wardId, days.toString()],
+    );
+    return result.rows.map((row) => ({
+      date: row.date,
+      score: parseFloat(row.score || '0'),
+      mood: row.mood || 'neutral',
+    }));
+  }
+
+  async getHealthKeywordStats(wardId: string, days: number) {
+    const result = await this.pool.query<{
+      health_keywords: Record<string, unknown> | null;
+    }>(
+      `select health_keywords
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+         and health_keywords is not null`,
+      [wardId, days.toString()],
+    );
+
+    const keywordCounts: Record<string, number> = {};
+    for (const row of result.rows) {
+      if (row.health_keywords) {
+        for (const [key, value] of Object.entries(row.health_keywords)) {
+          if (typeof value === 'number') {
+            keywordCounts[key] = (keywordCounts[key] || 0) + value;
+          } else {
+            keywordCounts[key] = (keywordCounts[key] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    return {
+      pain: { count: keywordCounts['pain'] || 0, trend: 'stable' },
+      sleep: { status: 'normal', mentions: keywordCounts['sleep'] || 0 },
+      meal: { status: 'regular', mentions: keywordCounts['meal'] || 0 },
+      medication: { status: 'compliant', mentions: keywordCounts['medication'] || 0 },
+    };
+  }
+
+  async getTopTopics(wardId: string, days: number, limit: number = 5) {
+    const result = await this.pool.query<{ tags: string[] | null }>(
+      `select tags
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+         and tags is not null`,
+      [wardId, days.toString()],
+    );
+
+    const topicCounts: Record<string, number> = {};
+    for (const row of result.rows) {
+      if (row.tags) {
+        for (const tag of row.tags) {
+          topicCounts[tag] = (topicCounts[tag] || 0) + 1;
+        }
+      }
+    }
+
+    return Object.entries(topicCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([topic, count]) => ({ topic, count }));
+  }
+
+  async getCallSummariesForReport(wardId: string, days: number) {
+    const result = await this.pool.query<{
+      summary: string | null;
+      mood: string | null;
+      health_keywords: Record<string, unknown> | null;
+    }>(
+      `select summary, mood, health_keywords
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+       order by created_at desc`,
+      [wardId, days.toString()],
+    );
+    return result.rows;
+  }
 }
