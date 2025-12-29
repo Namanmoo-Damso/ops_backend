@@ -1,10 +1,55 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
 
+type UserType = 'guardian' | 'ward' | null;
+
 type UserRow = {
   id: string;
   identity: string;
   display_name: string | null;
+  user_type: UserType;
+  email: string | null;
+  nickname: string | null;
+  profile_image_url: string | null;
+  kakao_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type GuardianRow = {
+  id: string;
+  user_id: string;
+  ward_email: string;
+  ward_phone_number: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type WardRow = {
+  id: string;
+  user_id: string;
+  phone_number: string;
+  guardian_id: string | null;
+  organization_id: string | null;
+  ai_persona: string;
+  weekly_call_count: number;
+  call_duration_minutes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type OrganizationRow = {
+  id: string;
+  name: string;
+  created_at: string;
+};
+
+type RefreshTokenRow = {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  created_at: string;
 };
 
 type DeviceRow = {
@@ -62,11 +107,12 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
   async upsertUser(identity: string, displayName?: string) {
     const result = await this.pool.query<UserRow>(
-      `insert into users (identity, display_name)
-       values ($1, $2)
+      `insert into users (identity, display_name, updated_at)
+       values ($1, $2, now())
        on conflict (identity)
-       do update set display_name = excluded.display_name
-       returning id, identity, display_name`,
+       do update set display_name = coalesce(excluded.display_name, users.display_name),
+         updated_at = now()
+       returning id, identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, created_at, updated_at`,
       [identity, displayName ?? null],
     );
     return result.rows[0];
@@ -191,7 +237,8 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
   }) {
     const tokenColumn = params.tokenType === 'voip' ? 'voip_token' : 'apns_token';
     const result = await this.pool.query<UserRow>(
-      `select u.id, u.identity, u.display_name
+      `select u.id, u.identity, u.display_name, u.user_type, u.email, u.nickname,
+              u.profile_image_url, u.kakao_id, u.created_at, u.updated_at
        from devices d
        join users u on d.user_id = u.id
        where d.${tokenColumn} = $1
