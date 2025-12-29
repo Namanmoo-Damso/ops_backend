@@ -1924,6 +1924,81 @@ export class AppController {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // [관제 대시보드 API] - Issue #17
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /v1/admin/dashboard/stats
+   * 관제 대시보드 전체 통계 조회
+   */
+  @Get('v1/admin/dashboard/stats')
+  async getDashboardStats() {
+    this.logger.log('getDashboardStats called');
+
+    try {
+      const [
+        overview,
+        todayStats,
+        weeklyTrend,
+        moodDistribution,
+        healthAlerts,
+        topKeywords,
+        organizationStats,
+        recentActivity,
+      ] = await Promise.all([
+        this.dbService.getDashboardOverview(),
+        this.dbService.getTodayStats(),
+        this.dbService.getWeeklyTrend(),
+        this.dbService.getMoodDistribution(),
+        this.dbService.getHealthAlertsSummary(),
+        this.dbService.getTopHealthKeywords(10),
+        this.dbService.getOrganizationStats(),
+        this.dbService.getRecentActivity(20),
+      ]);
+
+      return {
+        overview,
+        todayStats,
+        weeklyTrend,
+        moodDistribution,
+        healthAlerts,
+        topKeywords,
+        organizationStats,
+        recentActivity,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.warn(`getDashboardStats failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to fetch dashboard stats', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  /**
+   * GET /v1/admin/dashboard/realtime
+   * 관제 대시보드 실시간 통계 (빈번한 폴링용)
+   */
+  @Get('v1/admin/dashboard/realtime')
+  async getDashboardRealtime() {
+    this.logger.log('getDashboardRealtime called');
+
+    try {
+      const [realtime, recentActivity] = await Promise.all([
+        this.dbService.getRealtimeStats(),
+        this.dbService.getRecentActivity(10),
+      ]);
+
+      return {
+        ...realtime,
+        recentActivity,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.warn(`getDashboardRealtime failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to fetch realtime stats', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   private isValidEmail(email: string): boolean {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
