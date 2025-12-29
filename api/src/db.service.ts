@@ -377,4 +377,119 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     );
     return result.rows[0];
   }
+
+  // ============================================================
+  // Auth related methods
+  // ============================================================
+
+  async findUserByKakaoId(kakaoId: string) {
+    const result = await this.pool.query<UserRow>(
+      `select id, identity, display_name, user_type, email, nickname,
+              profile_image_url, kakao_id, created_at, updated_at
+       from users
+       where kakao_id = $1
+       limit 1`,
+      [kakaoId],
+    );
+    return result.rows[0];
+  }
+
+  async findUserById(userId: string) {
+    const result = await this.pool.query<UserRow>(
+      `select id, identity, display_name, user_type, email, nickname,
+              profile_image_url, kakao_id, created_at, updated_at
+       from users
+       where id = $1
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0];
+  }
+
+  async findGuardianByWardEmail(wardEmail: string) {
+    const result = await this.pool.query<GuardianRow>(
+      `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
+       from guardians
+       where ward_email = $1
+       limit 1`,
+      [wardEmail],
+    );
+    return result.rows[0];
+  }
+
+  async createUserWithKakao(params: {
+    kakaoId: string;
+    email: string | null;
+    nickname: string | null;
+    profileImageUrl: string | null;
+    userType: 'guardian' | 'ward';
+  }) {
+    const identity = `kakao_${params.kakaoId}`;
+    const result = await this.pool.query<UserRow>(
+      `insert into users (identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, now())
+       returning id, identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, created_at, updated_at`,
+      [
+        identity,
+        params.nickname,
+        params.userType,
+        params.email,
+        params.nickname,
+        params.profileImageUrl,
+        params.kakaoId,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async createWard(params: {
+    userId: string;
+    phoneNumber: string;
+    guardianId: string | null;
+  }) {
+    const result = await this.pool.query<WardRow>(
+      `insert into wards (user_id, phone_number, guardian_id, updated_at)
+       values ($1, $2, $3, now())
+       returning id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at`,
+      [params.userId, params.phoneNumber, params.guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async saveRefreshToken(params: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+  }) {
+    await this.pool.query(
+      `insert into refresh_tokens (user_id, token_hash, expires_at)
+       values ($1, $2, $3)`,
+      [params.userId, params.tokenHash, params.expiresAt.toISOString()],
+    );
+  }
+
+  async findRefreshToken(tokenHash: string) {
+    const result = await this.pool.query<RefreshTokenRow>(
+      `select id, user_id, token_hash, expires_at, created_at
+       from refresh_tokens
+       where token_hash = $1 and expires_at > now()
+       limit 1`,
+      [tokenHash],
+    );
+    return result.rows[0];
+  }
+
+  async deleteRefreshToken(tokenHash: string) {
+    await this.pool.query(
+      `delete from refresh_tokens where token_hash = $1`,
+      [tokenHash],
+    );
+  }
+
+  async deleteUserRefreshTokens(userId: string) {
+    await this.pool.query(
+      `delete from refresh_tokens where user_id = $1`,
+      [userId],
+    );
+  }
 }
