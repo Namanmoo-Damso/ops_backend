@@ -11,7 +11,11 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { parse } from 'csv-parse/sync';
 import { AppService } from './app.service';
 import { AuthService } from './auth.service';
 import { DbService } from './db.service';
@@ -1137,6 +1141,128 @@ export class AppController {
       this.logger.error(`analyzeCall failed callId=${callId} error=${message}`);
       throw new HttpException('Failed to analyze call', HttpStatus.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  @Post('/v1/admin/wards/bulk-upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async bulkUploadWards(
+    @Headers('authorization') authorization: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { organizationId?: string },
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!file) {
+      throw new HttpException('file is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const organizationId = body.organizationId?.trim();
+    if (!organizationId) {
+      throw new HttpException('organizationId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    // 파일 크기 제한 (5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      throw new HttpException('File size exceeds 5MB limit', HttpStatus.BAD_REQUEST);
+    }
+
+    // 기관 존재 확인
+    const organization = await this.dbService.findOrganization(organizationId);
+    if (!organization) {
+      throw new HttpException('Organization not found', HttpStatus.NOT_FOUND);
+    }
+
+    this.logger.log(`bulkUploadWards organizationId=${organizationId} fileSize=${file.size}`);
+
+    try {
+      // CSV 파싱
+      const records = parse(file.buffer, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      }) as Array<{
+        email?: string;
+        phone_number?: string;
+        name?: string;
+        birth_date?: string;
+        address?: string;
+      }>;
+
+      const results = {
+        total: records.length,
+        created: 0,
+        skipped: 0,
+        failed: 0,
+        errors: [] as Array<{ row: number; email: string; reason: string }>,
+      };
+
+      for (let i = 0; i < records.length; i++) {
+        const record = records[i];
+        const row = i + 2; // 헤더 제외, 1-indexed
+        const email = record.email?.trim() ?? '';
+
+        try {
+          // 유효성 검증
+          if (!email || !this.isValidEmail(email)) {
+            throw new Error('잘못된 이메일 형식');
+          }
+          if (!record.phone_number?.trim()) {
+            throw new Error('전화번호 필수');
+          }
+          if (!record.name?.trim()) {
+            throw new Error('이름 필수');
+          }
+
+          // 중복 체크
+          const existing = await this.dbService.findOrganizationWard(organizationId, email);
+          if (existing) {
+            results.skipped++;
+            continue;
+          }
+
+          // 저장
+          await this.dbService.createOrganizationWard({
+            organizationId,
+            email,
+            phoneNumber: record.phone_number.trim(),
+            name: record.name.trim(),
+            birthDate: record.birth_date?.trim() || null,
+            address: record.address?.trim() || null,
+          });
+
+          results.created++;
+        } catch (error) {
+          results.failed++;
+          results.errors.push({
+            row,
+            email,
+            reason: (error as Error).message,
+          });
+        }
+      }
+
+      this.logger.log(
+        `bulkUploadWards completed organizationId=${organizationId} total=${results.total} created=${results.created} skipped=${results.skipped} failed=${results.failed}`,
+      );
+
+      return {
+        success: true,
+        ...results,
+      };
+    } catch (error) {
+      this.logger.error(`bulkUploadWards failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to process CSV file', HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  private isValidEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   }
 
   private summarizeToken(token?: string) {

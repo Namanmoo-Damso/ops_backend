@@ -1276,4 +1276,90 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     );
     return result.rows[0];
   }
+
+  // ============================================================
+  // Organization Wards methods (CSV bulk upload)
+  // ============================================================
+
+  async findOrganization(organizationId: string) {
+    const result = await this.pool.query<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>(
+      `select id, name, created_at from organizations where id = $1`,
+      [organizationId],
+    );
+    return result.rows[0];
+  }
+
+  async findOrganizationWard(organizationId: string, email: string) {
+    const result = await this.pool.query<{
+      id: string;
+      organization_id: string;
+      email: string;
+    }>(
+      `select id, organization_id, email
+       from organization_wards
+       where organization_id = $1 and email = $2
+       limit 1`,
+      [organizationId, email],
+    );
+    return result.rows[0];
+  }
+
+  async createOrganizationWard(params: {
+    organizationId: string;
+    email: string;
+    phoneNumber: string;
+    name: string;
+    birthDate: string | null;
+    address: string | null;
+  }) {
+    const result = await this.pool.query<{
+      id: string;
+      organization_id: string;
+      email: string;
+      phone_number: string;
+      name: string;
+      birth_date: string | null;
+      address: string | null;
+      is_registered: boolean;
+      created_at: string;
+    }>(
+      `insert into organization_wards (organization_id, email, phone_number, name, birth_date, address)
+       values ($1, $2, $3, $4, $5, $6)
+       returning id, organization_id, email, phone_number, name, birth_date, address, is_registered, created_at`,
+      [
+        params.organizationId,
+        params.email,
+        params.phoneNumber,
+        params.name,
+        params.birthDate,
+        params.address,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async getOrganizationWards(organizationId: string) {
+    const result = await this.pool.query<{
+      id: string;
+      email: string;
+      phone_number: string;
+      name: string;
+      birth_date: string | null;
+      address: string | null;
+      is_registered: boolean;
+      ward_id: string | null;
+      created_at: string;
+    }>(
+      `select id, email, phone_number, name, birth_date, address, is_registered, ward_id, created_at
+       from organization_wards
+       where organization_id = $1
+       order by created_at desc`,
+      [organizationId],
+    );
+    return result.rows;
+  }
 }

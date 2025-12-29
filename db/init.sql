@@ -242,3 +242,27 @@ create table if not exists call_schedules (
 create index if not exists idx_call_schedules_ward_id on call_schedules(ward_id);
 create index if not exists idx_call_schedules_day_of_week on call_schedules(day_of_week);
 create index if not exists idx_call_schedules_is_active on call_schedules(is_active);
+
+-- =============================================================================
+-- 15. ORGANIZATION_WARDS (기관 등록 피보호자)
+-- =============================================================================
+-- 기관이 CSV로 일괄 등록한 피보호자 정보
+create table if not exists organization_wards (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid references organizations(id) on delete cascade,
+  email text not null,
+  phone_number text not null,
+  name text not null,
+  birth_date date,
+  address text,
+  is_registered boolean not null default false,  -- 앱 가입 완료 여부
+  ward_id uuid references wards(id) on delete set null,  -- 가입 후 연결
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  unique (organization_id, email)
+);
+
+create index if not exists idx_org_wards_org_id on organization_wards(organization_id);
+create index if not exists idx_org_wards_email on organization_wards(email);
+create index if not exists idx_org_wards_is_registered on organization_wards(is_registered);
