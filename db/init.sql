@@ -203,3 +203,156 @@ create table if not exists refresh_tokens (
 create index if not exists idx_refresh_tokens_user_id on refresh_tokens(user_id);
 create index if not exists idx_refresh_tokens_expires_at on refresh_tokens(expires_at);
 create index if not exists idx_refresh_tokens_token_hash on refresh_tokens(token_hash);
+
+-- =============================================================================
+-- 13. GUARDIAN_WARD_REGISTRATIONS (보호자-피보호자 추가 등록)
+-- =============================================================================
+-- 보호자가 추가로 등록한 피보호자 정보 (다중 피보호자 지원)
+-- 1차 등록은 guardians.ward_email/ward_phone_number 사용
+create table if not exists guardian_ward_registrations (
+  id uuid primary key default gen_random_uuid(),
+  guardian_id uuid references guardians(id) on delete cascade,
+  ward_email text not null,
+  ward_phone_number text not null,
+  linked_ward_id uuid references wards(id) on delete set null,  -- 실제 매칭 시 연결
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_gwr_guardian_id on guardian_ward_registrations(guardian_id);
+create index if not exists idx_gwr_ward_email on guardian_ward_registrations(ward_email);
+create index if not exists idx_gwr_linked_ward_id on guardian_ward_registrations(linked_ward_id);
+
+-- =============================================================================
+-- 14. CALL_SCHEDULES (예약 통화)
+-- =============================================================================
+-- 어르신별 정기 통화 스케줄
+create table if not exists call_schedules (
+  id uuid primary key default gen_random_uuid(),
+  ward_id uuid references wards(id) on delete cascade,
+  day_of_week int not null,  -- 0=일, 1=월, ..., 6=토
+  scheduled_time time not null,  -- 예: '10:00:00'
+  is_active boolean not null default true,
+  last_called_at timestamptz,
+  reminder_sent_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_call_schedules_ward_id on call_schedules(ward_id);
+create index if not exists idx_call_schedules_day_of_week on call_schedules(day_of_week);
+create index if not exists idx_call_schedules_is_active on call_schedules(is_active);
+
+-- =============================================================================
+-- 15. ORGANIZATION_WARDS (기관 등록 피보호자)
+-- =============================================================================
+-- 기관이 CSV로 일괄 등록한 피보호자 정보
+create table if not exists organization_wards (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid references organizations(id) on delete cascade,
+  email text not null,
+  phone_number text not null,
+  name text not null,
+  birth_date date,
+  address text,
+  is_registered boolean not null default false,  -- 앱 가입 완료 여부
+  ward_id uuid references wards(id) on delete set null,  -- 가입 후 연결
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  unique (organization_id, email)
+);
+
+create index if not exists idx_org_wards_org_id on organization_wards(organization_id);
+create index if not exists idx_org_wards_email on organization_wards(email);
+create index if not exists idx_org_wards_is_registered on organization_wards(is_registered);
+
+-- =============================================================================
+-- 16. WARD_LOCATIONS (피보호자 위치 이력)
+-- =============================================================================
+-- 모바일에서 전송받은 피보호자 실시간 위치정보 이력
+create table if not exists ward_locations (
+  id uuid primary key default gen_random_uuid(),
+  ward_id uuid references wards(id) on delete cascade,
+  latitude decimal(10, 8) not null,
+  longitude decimal(11, 8) not null,
+  accuracy decimal(6, 2),
+  recorded_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_ward_locations_ward_id on ward_locations(ward_id);
+create index if not exists idx_ward_locations_recorded_at on ward_locations(recorded_at);
+create index if not exists idx_ward_locations_ward_recorded on ward_locations(ward_id, recorded_at desc);
+
+-- =============================================================================
+-- 17. WARD_CURRENT_LOCATIONS (피보호자 최신 위치)
+-- =============================================================================
+-- 최신 위치만 빠르게 조회하기 위한 테이블
+create table if not exists ward_current_locations (
+  ward_id uuid primary key references wards(id) on delete cascade,
+  latitude decimal(10, 8) not null,
+  longitude decimal(11, 8) not null,
+  accuracy decimal(6, 2),
+  status text not null default 'normal',  -- 'normal' | 'warning' | 'emergency'
+  last_updated timestamptz not null
+);
+
+create index if not exists idx_ward_current_locations_status on ward_current_locations(status);
+
+-- =============================================================================
+-- 18. EMERGENCY_AGENCIES (비상 관계기관)
+-- =============================================================================
+-- 비상 시 연락할 관계기관 정보 (소방서, 경찰서, 병원, 복지센터)
+create table if not exists emergency_agencies (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text not null,  -- 'fire_station' | 'police' | 'hospital' | 'welfare_center'
+  phone_number text not null,
+  latitude decimal(10, 8) not null,
+  longitude decimal(11, 8) not null,
+  address text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_emergency_agencies_type on emergency_agencies(type);
+create index if not exists idx_emergency_agencies_active on emergency_agencies(is_active);
+
+-- =============================================================================
+-- 19. EMERGENCIES (비상 상황)
+-- =============================================================================
+create table if not exists emergencies (
+  id uuid primary key default gen_random_uuid(),
+  ward_id uuid references wards(id) on delete set null,
+  type text not null,  -- 'manual' | 'ai_detected' | 'geofence' | 'admin'
+  status text not null default 'active',  -- 'active' | 'resolved' | 'false_alarm'
+  latitude decimal(10, 8),
+  longitude decimal(11, 8),
+  message text,
+  guardian_notified boolean not null default false,
+  resolved_at timestamptz,
+  resolved_by uuid references users(id) on delete set null,
+  resolution_note text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_emergencies_ward_id on emergencies(ward_id);
+create index if not exists idx_emergencies_status on emergencies(status);
+create index if not exists idx_emergencies_created_at on emergencies(created_at desc);
+
+-- =============================================================================
+-- 20. EMERGENCY_CONTACTS (비상 연락 기록)
+-- =============================================================================
+-- 비상 상황 시 관계기관에 연락한 기록
+create table if not exists emergency_contacts (
+  id uuid primary key default gen_random_uuid(),
+  emergency_id uuid references emergencies(id) on delete cascade,
+  agency_id uuid references emergency_agencies(id) on delete set null,
+  distance_km decimal(6, 2),
+  contacted_at timestamptz not null default now(),
+  response_status text not null default 'pending'  -- 'pending' | 'answered' | 'dispatched' | 'failed'
+);
+
+create index if not exists idx_emergency_contacts_emergency_id on emergency_contacts(emergency_id);
+create index if not exists idx_emergency_contacts_agency_id on emergency_contacts(agency_id);
