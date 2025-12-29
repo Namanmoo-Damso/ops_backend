@@ -18,6 +18,7 @@ import {
   useTracks,
 } from "@livekit/components-react";
 import { RoomEvent, Track, VideoQuality } from "livekit-client";
+import SidebarLayout from "../components/SidebarLayout";
 import styles from "./page.module.css";
 
 type Role = "host" | "viewer" | "observer";
@@ -46,7 +47,6 @@ type LiveTileData = {
 type GridSlot =
   | { type: "live"; key: string; tile: LiveTileData }
   | { type: "empty"; key: string };
-const GRID_SIZE = 9;
 
 const getInitials = (name: string) => {
   const parts = name.trim().split(" ");
@@ -387,6 +387,7 @@ const RoomShell = ({
   roomName,
   apiBase,
   selfIdentity,
+  gridSize,
 }: {
   focusedId: string | null;
   onFocus: (id: string | null) => void;
@@ -402,6 +403,7 @@ const RoomShell = ({
   roomName: string;
   apiBase: string;
   selfIdentity: string;
+  gridSize: number;
 }) => {
   const tracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: true }],
@@ -886,6 +888,7 @@ const RoomShell = ({
   const visibleLiveTiles =
     showOnlyFocused && focusedLiveTile ? [focusedLiveTile] : liveTiles;
 
+  const totalSlots = gridSize * gridSize;
   const gridSlots: GridSlot[] = useMemo(() => {
     if (showOnlyFocused) {
       return visibleLiveTiles.map((tile) => ({
@@ -895,7 +898,7 @@ const RoomShell = ({
       }));
     }
     const slots: GridSlot[] = [];
-    for (let index = 0; index < GRID_SIZE; index += 1) {
+    for (let index = 0; index < totalSlots; index += 1) {
       const tile = visibleLiveTiles[index];
       if (tile) {
         slots.push({ type: "live", key: `live-${tile.key}`, tile });
@@ -904,7 +907,7 @@ const RoomShell = ({
       }
     }
     return slots;
-  }, [showOnlyFocused, visibleLiveTiles]);
+  }, [showOnlyFocused, visibleLiveTiles, totalSlots]);
 
   const sidebarList = useMemo(() => {
     const list = Object.values(knownParticipants).filter(
@@ -947,7 +950,13 @@ const RoomShell = ({
           </div>
         ) : null}
         <RoomAudioRenderer />
-        <div className={`${styles.grid} ${showOnlyFocused ? styles.gridFocused : ""}`}>
+        <div
+          className={`${styles.grid} ${showOnlyFocused ? styles.gridFocused : ""}`}
+          style={{
+            gridTemplateColumns: showOnlyFocused ? "1fr" : `repeat(${gridSize}, minmax(0, 1fr))`,
+            gridTemplateRows: showOnlyFocused ? "1fr" : `repeat(${gridSize}, minmax(0, 1fr))`,
+          }}
+        >
           {gridSlots.map((slot) =>
             slot.type === "live" ? (
               <LiveTile
@@ -1133,6 +1142,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [inviteStatus, setInviteStatus] = useState<string | null>(null);
   const [inviteBusy, setInviteBusy] = useState(false);
+  const [gridSize, setGridSize] = useState(3);
 
   useEffect(() => {
     if (apiBaseEnv) {
@@ -1255,44 +1265,71 @@ export default function Home() {
   };
 
   return (
-    <div className={styles.page}>
-      <div className={styles.topBar}>
-        <div className={styles.brand}>
-          <div className={styles.logo} />
-          <div className={styles.meetingTitle}>
-            담소 모니터링 시스템
+    <SidebarLayout>
+      <div className={styles.page}>
+        {/* Grid Control Header */}
+        <div className={styles.gridHeader}>
+          <div className={styles.gridInfo}>
+            <span className={styles.gridLabel}>그리드 크기</span>
+            <span className={styles.gridValue}>{gridSize} x {gridSize}</span>
+          </div>
+          <div className={styles.gridControl}>
+            <button
+              className={styles.gridBtn}
+              onClick={() => setGridSize((prev) => Math.max(3, prev - 1))}
+              disabled={gridSize <= 3}
+              type="button"
+            >
+              −
+            </button>
+            <input
+              type="range"
+              min="3"
+              max="7"
+              value={gridSize}
+              onChange={(e) => setGridSize(Number(e.target.value))}
+              className={styles.gridSlider}
+            />
+            <button
+              className={styles.gridBtn}
+              onClick={() => setGridSize((prev) => Math.min(7, prev + 1))}
+              disabled={gridSize >= 7}
+              type="button"
+            >
+              +
+            </button>
           </div>
         </div>
-        {null}
-      </div>
 
-      <div className={styles.roomWrap}>
-        <LiveKitRoom
-          className={styles.room}
-          serverUrl={serverUrl}
-          token={token}
-          connect={connected}
-          audio
-          video
-        >
-          <RoomShell
-            focusedId={focusedId}
-            onFocus={setFocusedId}
-            showJoin={!connected}
-            onJoin={joinRoom}
-            joinBusy={connecting}
-            error={error}
-            connected={connected}
-            onLeave={leaveRoom}
-            onInvite={inviteParticipant}
-            inviteBusy={inviteBusy}
-            inviteStatus={inviteStatus}
-            roomName={roomName}
-            apiBase={apiBase || ""}
-            selfIdentity={identity}
-          />
-        </LiveKitRoom>
+        <div className={styles.roomWrap}>
+          <LiveKitRoom
+            className={styles.room}
+            serverUrl={serverUrl}
+            token={token}
+            connect={connected}
+            audio
+            video
+          >
+            <RoomShell
+              focusedId={focusedId}
+              onFocus={setFocusedId}
+              showJoin={!connected}
+              onJoin={joinRoom}
+              joinBusy={connecting}
+              error={error}
+              connected={connected}
+              onLeave={leaveRoom}
+              onInvite={inviteParticipant}
+              inviteBusy={inviteBusy}
+              inviteStatus={inviteStatus}
+              roomName={roomName}
+              apiBase={apiBase || ""}
+              selfIdentity={identity}
+              gridSize={gridSize}
+            />
+          </LiveKitRoom>
+        </div>
       </div>
-    </div>
+    </SidebarLayout>
   );
 }

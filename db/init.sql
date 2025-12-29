@@ -250,11 +250,13 @@ create index if not exists idx_call_schedules_is_active on call_schedules(is_act
 create table if not exists organization_wards (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid references organizations(id) on delete cascade,
+  uploaded_by_admin_id uuid references admins(id) on delete set null,  -- 등록한 관리자
   email text not null,
   phone_number text not null,
   name text not null,
   birth_date date,
   address text,
+  notes text,  -- 관리자 메모
   is_registered boolean not null default false,  -- 앱 가입 완료 여부
   ward_id uuid references wards(id) on delete set null,  -- 가입 후 연결
   created_at timestamptz not null default now(),
@@ -266,6 +268,7 @@ create table if not exists organization_wards (
 create index if not exists idx_org_wards_org_id on organization_wards(organization_id);
 create index if not exists idx_org_wards_email on organization_wards(email);
 create index if not exists idx_org_wards_is_registered on organization_wards(is_registered);
+create index if not exists idx_org_wards_uploaded_by on organization_wards(uploaded_by_admin_id);
 
 -- =============================================================================
 -- 16. WARD_LOCATIONS (피보호자 위치 이력)
@@ -356,3 +359,57 @@ create table if not exists emergency_contacts (
 
 create index if not exists idx_emergency_contacts_emergency_id on emergency_contacts(emergency_id);
 create index if not exists idx_emergency_contacts_agency_id on emergency_contacts(agency_id);
+
+-- =============================================================================
+-- 21. ADMINS (관제 관리자)
+-- =============================================================================
+-- 관제페이지 관리자 계정 (OAuth 로그인)
+create table if not exists admins (
+  id uuid primary key default gen_random_uuid(),
+  email text unique not null,
+  name text,
+  provider text not null,  -- 'kakao' | 'google'
+  provider_id text not null,
+  role text not null default 'viewer',  -- 'super_admin' | 'org_admin' | 'viewer'
+  organization_id uuid references organizations(id) on delete set null,
+  is_active boolean not null default true,
+  last_login_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  unique (provider, provider_id)
+);
+
+create index if not exists idx_admins_email on admins(email);
+create index if not exists idx_admins_provider on admins(provider, provider_id);
+create index if not exists idx_admins_role on admins(role);
+create index if not exists idx_admins_organization_id on admins(organization_id);
+
+-- =============================================================================
+-- 22. ADMIN_PERMISSIONS (관리자 세부 권한)
+-- =============================================================================
+-- 관리자별 세부 권한 설정
+create table if not exists admin_permissions (
+  id uuid primary key default gen_random_uuid(),
+  admin_id uuid references admins(id) on delete cascade,
+  permission text not null,  -- 'dashboard:read' | 'wards:write' | 'emergency:manage' etc.
+  created_at timestamptz not null default now(),
+
+  unique (admin_id, permission)
+);
+
+create index if not exists idx_admin_permissions_admin_id on admin_permissions(admin_id);
+
+-- =============================================================================
+-- 23. ADMIN_REFRESH_TOKENS (관리자 리프레시 토큰)
+-- =============================================================================
+create table if not exists admin_refresh_tokens (
+  id uuid primary key default gen_random_uuid(),
+  admin_id uuid references admins(id) on delete cascade,
+  token_hash text unique not null,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_admin_refresh_tokens_admin_id on admin_refresh_tokens(admin_id);
+create index if not exists idx_admin_refresh_tokens_token_hash on admin_refresh_tokens(token_hash);
