@@ -31,6 +31,40 @@ export class AppController {
     return { status: 'ok', ts: new Date().toISOString() };
   }
 
+  @Post('/webhook/kakao/unlink')
+  async kakaoUnlink(
+    @Body() body: { user_id?: string; referrer_type?: string },
+  ) {
+    const kakaoId = body.user_id?.trim();
+    const referrerType = body.referrer_type ?? 'unknown';
+
+    if (!kakaoId) {
+      // 카카오 웹훅은 반드시 200 응답해야 함
+      this.logger.warn('kakaoUnlink missing user_id');
+      return { success: true };
+    }
+
+    this.logger.log(`kakaoUnlink kakaoId=${kakaoId} type=${referrerType}`);
+
+    try {
+      const user = await this.dbService.findUserByKakaoId(kakaoId);
+      if (!user) {
+        // 이미 탈퇴했거나 없는 사용자
+        this.logger.log(`kakaoUnlink user not found kakaoId=${kakaoId}`);
+        return { success: true };
+      }
+
+      await this.dbService.deleteUser(user.id);
+      this.logger.log(`kakaoUnlink deleted userId=${user.id}`);
+
+      return { success: true };
+    } catch (error) {
+      // 웹훅은 에러가 나도 200 응답
+      this.logger.error(`kakaoUnlink failed kakaoId=${kakaoId} error=${(error as Error).message}`);
+      return { success: true };
+    }
+  }
+
   @Post('/v1/auth/kakao')
   async authKakao(
     @Body()
