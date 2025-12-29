@@ -64,6 +64,7 @@ export class AppController {
       voipToken?: string;
       platform?: string;
       env?: 'prod' | 'sandbox';
+      supportsCallKit?: boolean;
     },
   ) {
     const config = this.appService.getConfig();
@@ -120,12 +121,13 @@ export class AppController {
       name,
       role,
       device:
-        body.apnsToken || body.voipToken || body.platform || body.env
+        body.apnsToken || body.voipToken || body.platform || body.env || body.supportsCallKit !== undefined
           ? {
               apnsToken: body.apnsToken?.trim(),
               voipToken: body.voipToken?.trim(),
               platform: body.platform?.trim(),
               env: body.env,
+              supportsCallKit: body.supportsCallKit,
             }
           : undefined,
     });

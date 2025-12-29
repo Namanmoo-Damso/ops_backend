@@ -567,7 +567,9 @@ const RoomShell = ({
       normalized === "user" ||
       normalized === "viewer" ||
       normalized === "participant" ||
-      normalized === "unknown"
+      normalized === "unknown" ||
+      normalized.startsWith("ios-") ||
+      normalized.startsWith("host-")
     );
   };
 
@@ -906,7 +908,11 @@ const RoomShell = ({
 
   const sidebarList = useMemo(() => {
     const list = Object.values(knownParticipants).filter(
-      (participant) => !(participant.you && participant.online === false),
+      (participant) => {
+        // Hide self if offline
+        if (participant.you && participant.online === false) return false;
+        return true;
+      },
     );
     list.sort((a, b) => {
       const onlineDiff = Number(!!b.online) - Number(!!a.online);
@@ -923,6 +929,11 @@ const RoomShell = ({
       setSelectedParticipantId(null);
     }
   }, [knownParticipants, selectedParticipantId]);
+
+  const selectedParticipant = selectedParticipantId
+    ? knownParticipants[selectedParticipantId]
+    : null;
+  const isSelectedOnline = selectedParticipant?.online === true;
 
   return (
     <div className={styles.content}>
@@ -1084,10 +1095,17 @@ const RoomShell = ({
           </button>
           <button
             className={`${styles.footerButton} ${styles.primary}`}
-            onClick={() => onInvite(selectedParticipantId ?? "")}
-            disabled={!connected || inviteBusy || !selectedParticipantId}
+            onClick={() => {
+              console.log("Invite clicked", { selectedParticipantId, selectedParticipant, isSelectedOnline });
+              if (isSelectedOnline) {
+                console.log("Blocked: participant is online");
+                return;
+              }
+              onInvite(selectedParticipantId ?? "");
+            }}
+            disabled={!connected || inviteBusy || !selectedParticipantId || isSelectedOnline}
           >
-            Invite
+            {isSelectedOnline ? "Already in room" : "Invite"}
           </button>
         </div>
         {inviteStatus ? (
