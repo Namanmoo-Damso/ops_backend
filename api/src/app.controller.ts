@@ -9,6 +9,7 @@ import {
   Logger,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import { AppService } from './app.service';
 import { AuthService } from './auth.service';
@@ -312,6 +313,85 @@ export class AppController {
       }
       this.logger.warn(`getGuardianDashboard failed error=${(error as Error).message}`);
       throw new HttpException('Failed to get dashboard', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/guardian/report')
+  async getGuardianReport(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('period') period?: string,
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+    const reportPeriod = period === 'month' ? 'month' : 'week';
+    const days = reportPeriod === 'month' ? 30 : 7;
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      const linkedWard = await this.dbService.findWardByGuardianId(guardian.id);
+      if (!linkedWard) {
+        return {
+          period: reportPeriod,
+          emotionTrend: [],
+          healthKeywords: {},
+          topTopics: [],
+          weeklySummary: '연결된 어르신이 없습니다.',
+          recommendations: [],
+        };
+      }
+
+      this.logger.log(`getGuardianReport guardianId=${guardian.id} wardId=${linkedWard.id} period=${reportPeriod}`);
+
+      const [emotionTrend, healthKeywords, topTopics, summaries] = await Promise.all([
+        this.dbService.getEmotionTrend(linkedWard.id, days),
+        this.dbService.getHealthKeywordStats(linkedWard.id, days),
+        this.dbService.getTopTopics(linkedWard.id, days, 5),
+        this.dbService.getCallSummariesForReport(linkedWard.id, days),
+      ]);
+
+      // AI 요약 대신 간단한 요약 생성
+      const summaryTexts = summaries
+        .filter((s) => s.summary)
+        .map((s) => s.summary)
+        .slice(0, 3);
+      const weeklySummary = summaryTexts.length > 0
+        ? `최근 ${days}일간 ${summaries.length}건의 대화가 있었습니다. ${summaryTexts.join(' ')}`
+        : `최근 ${days}일간 대화 기록이 없습니다.`;
+
+      // 간단한 추천 사항 생성
+      const recommendations: string[] = [];
+      if (healthKeywords.pain.count > 0) {
+        recommendations.push('통증 관련 언급이 있었습니다. 건강 상태를 확인해보세요.');
+      }
+      if (emotionTrend.some((e) => e.mood === 'negative')) {
+        recommendations.push('부정적인 감정이 감지되었습니다. 대화를 나눠보세요.');
+      }
+      if (summaries.length < 3) {
+        recommendations.push('대화 빈도가 적습니다. 정기적인 통화를 권장합니다.');
+      }
+
+      return {
+        period: reportPeriod,
+        emotionTrend,
+        healthKeywords,
+        topTopics,
+        weeklySummary,
+        recommendations,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getGuardianReport failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get report', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
