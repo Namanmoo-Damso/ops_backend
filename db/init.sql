@@ -299,3 +299,60 @@ create table if not exists ward_current_locations (
 );
 
 create index if not exists idx_ward_current_locations_status on ward_current_locations(status);
+
+-- =============================================================================
+-- 18. EMERGENCY_AGENCIES (비상 관계기관)
+-- =============================================================================
+-- 비상 시 연락할 관계기관 정보 (소방서, 경찰서, 병원, 복지센터)
+create table if not exists emergency_agencies (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text not null,  -- 'fire_station' | 'police' | 'hospital' | 'welfare_center'
+  phone_number text not null,
+  latitude decimal(10, 8) not null,
+  longitude decimal(11, 8) not null,
+  address text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_emergency_agencies_type on emergency_agencies(type);
+create index if not exists idx_emergency_agencies_active on emergency_agencies(is_active);
+
+-- =============================================================================
+-- 19. EMERGENCIES (비상 상황)
+-- =============================================================================
+create table if not exists emergencies (
+  id uuid primary key default gen_random_uuid(),
+  ward_id uuid references wards(id) on delete set null,
+  type text not null,  -- 'manual' | 'ai_detected' | 'geofence' | 'admin'
+  status text not null default 'active',  -- 'active' | 'resolved' | 'false_alarm'
+  latitude decimal(10, 8),
+  longitude decimal(11, 8),
+  message text,
+  guardian_notified boolean not null default false,
+  resolved_at timestamptz,
+  resolved_by uuid references users(id) on delete set null,
+  resolution_note text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_emergencies_ward_id on emergencies(ward_id);
+create index if not exists idx_emergencies_status on emergencies(status);
+create index if not exists idx_emergencies_created_at on emergencies(created_at desc);
+
+-- =============================================================================
+-- 20. EMERGENCY_CONTACTS (비상 연락 기록)
+-- =============================================================================
+-- 비상 상황 시 관계기관에 연락한 기록
+create table if not exists emergency_contacts (
+  id uuid primary key default gen_random_uuid(),
+  emergency_id uuid references emergencies(id) on delete cascade,
+  agency_id uuid references emergency_agencies(id) on delete set null,
+  distance_km decimal(6, 2),
+  contacted_at timestamptz not null default now(),
+  response_status text not null default 'pending'  -- 'pending' | 'answered' | 'dispatched' | 'failed'
+);
+
+create index if not exists idx_emergency_contacts_emergency_id on emergency_contacts(emergency_id);
+create index if not exists idx_emergency_contacts_agency_id on emergency_contacts(agency_id);
