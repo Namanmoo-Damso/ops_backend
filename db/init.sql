@@ -222,3 +222,23 @@ create table if not exists guardian_ward_registrations (
 create index if not exists idx_gwr_guardian_id on guardian_ward_registrations(guardian_id);
 create index if not exists idx_gwr_ward_email on guardian_ward_registrations(ward_email);
 create index if not exists idx_gwr_linked_ward_id on guardian_ward_registrations(linked_ward_id);
+
+-- =============================================================================
+-- 14. CALL_SCHEDULES (예약 통화)
+-- =============================================================================
+-- 어르신별 정기 통화 스케줄
+create table if not exists call_schedules (
+  id uuid primary key default gen_random_uuid(),
+  ward_id uuid references wards(id) on delete cascade,
+  day_of_week int not null,  -- 0=일, 1=월, ..., 6=토
+  scheduled_time time not null,  -- 예: '10:00:00'
+  is_active boolean not null default true,
+  last_called_at timestamptz,
+  reminder_sent_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_call_schedules_ward_id on call_schedules(ward_id);
+create index if not exists idx_call_schedules_day_of_week on call_schedules(day_of_week);
+create index if not exists idx_call_schedules_is_active on call_schedules(is_active);
