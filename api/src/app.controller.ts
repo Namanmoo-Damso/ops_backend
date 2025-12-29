@@ -9,11 +9,18 @@ import {
   Logger,
   Param,
   Post,
+  Put,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { parse } from 'csv-parse/sync';
 import { AppService } from './app.service';
 import { AuthService } from './auth.service';
 import { DbService } from './db.service';
+import { NotificationScheduler } from './notification.scheduler';
+import { AiService } from './ai.service';
 
 @Controller()
 export class AppController {
@@ -23,11 +30,47 @@ export class AppController {
     private readonly appService: AppService,
     private readonly authService: AuthService,
     private readonly dbService: DbService,
+    private readonly notificationScheduler: NotificationScheduler,
+    private readonly aiService: AiService,
   ) {}
 
   @Get('/healthz')
   getHealth() {
     return { status: 'ok', ts: new Date().toISOString() };
+  }
+
+  @Post('/webhook/kakao/unlink')
+  async kakaoUnlink(
+    @Body() body: { user_id?: string; referrer_type?: string },
+  ) {
+    const kakaoId = body.user_id?.trim();
+    const referrerType = body.referrer_type ?? 'unknown';
+
+    if (!kakaoId) {
+      // 카카오 웹훅은 반드시 200 응답해야 함
+      this.logger.warn('kakaoUnlink missing user_id');
+      return { success: true };
+    }
+
+    this.logger.log(`kakaoUnlink kakaoId=${kakaoId} type=${referrerType}`);
+
+    try {
+      const user = await this.dbService.findUserByKakaoId(kakaoId);
+      if (!user) {
+        // 이미 탈퇴했거나 없는 사용자
+        this.logger.log(`kakaoUnlink user not found kakaoId=${kakaoId}`);
+        return { success: true };
+      }
+
+      await this.dbService.deleteUser(user.id);
+      this.logger.log(`kakaoUnlink deleted userId=${user.id}`);
+
+      return { success: true };
+    } catch (error) {
+      // 웹훅은 에러가 나도 200 응답
+      this.logger.error(`kakaoUnlink failed kakaoId=${kakaoId} error=${(error as Error).message}`);
+      return { success: true };
+    }
   }
 
   @Post('/v1/auth/kakao')
@@ -395,6 +438,329 @@ export class AppController {
     }
   }
 
+  @Get('/v1/guardian/wards')
+  async getGuardianWards(@Headers('authorization') authorization: string | undefined) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`getGuardianWards guardianId=${guardian.id}`);
+
+      const wards = await this.dbService.getGuardianWards(guardian.id);
+
+      return {
+        wards: wards.map((w) => ({
+          id: w.id,
+          email: w.ward_email,
+          phoneNumber: w.ward_phone_number,
+          isPrimary: w.is_primary,
+          nickname: w.ward_nickname,
+          profileImageUrl: w.ward_profile_image_url,
+          isLinked: w.linked_ward_id !== null,
+          lastCallAt: w.last_call_at,
+        })),
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getGuardianWards failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get wards', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Post('/v1/guardian/wards')
+  async createGuardianWard(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: { wardEmail?: string; wardPhoneNumber?: string },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    const wardEmail = body.wardEmail?.trim();
+    const wardPhoneNumber = body.wardPhoneNumber?.trim();
+
+    if (!wardEmail) {
+      throw new HttpException('wardEmail is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardPhoneNumber) {
+      throw new HttpException('wardPhoneNumber is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardEmail.includes('@')) {
+      throw new HttpException('Invalid email format', HttpStatus.BAD_REQUEST);
+    }
+    if (!/^[\d-]+$/.test(wardPhoneNumber)) {
+      throw new HttpException('Invalid phone number format', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`createGuardianWard guardianId=${guardian.id} wardEmail=${wardEmail}`);
+
+      const registration = await this.dbService.createGuardianWardRegistration({
+        guardianId: guardian.id,
+        wardEmail,
+        wardPhoneNumber,
+      });
+
+      return {
+        id: registration.id,
+        wardEmail: registration.ward_email,
+        wardPhoneNumber: registration.ward_phone_number,
+        isLinked: false,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`createGuardianWard failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to create ward', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('/v1/guardian/wards/:wardId')
+  async updateGuardianWard(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+    @Body() body: { wardEmail?: string; wardPhoneNumber?: string },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    const wardEmail = body.wardEmail?.trim();
+    const wardPhoneNumber = body.wardPhoneNumber?.trim();
+
+    if (!wardEmail) {
+      throw new HttpException('wardEmail is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardPhoneNumber) {
+      throw new HttpException('wardPhoneNumber is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardEmail.includes('@')) {
+      throw new HttpException('Invalid email format', HttpStatus.BAD_REQUEST);
+    }
+    if (!/^[\d-]+$/.test(wardPhoneNumber)) {
+      throw new HttpException('Invalid phone number format', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`updateGuardianWard guardianId=${guardian.id} wardId=${wardId}`);
+
+      // 1차 등록(primary) 수정인지 확인
+      if (wardId === guardian.id) {
+        const updated = await this.dbService.updateGuardianPrimaryWard({
+          guardianId: guardian.id,
+          wardEmail,
+          wardPhoneNumber,
+        });
+        if (!updated) {
+          throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+        }
+        return {
+          id: updated.id,
+          wardEmail: updated.ward_email,
+          wardPhoneNumber: updated.ward_phone_number,
+          isPrimary: true,
+        };
+      }
+
+      // 추가 등록 수정
+      const updated = await this.dbService.updateGuardianWardRegistration({
+        id: wardId,
+        guardianId: guardian.id,
+        wardEmail,
+        wardPhoneNumber,
+      });
+
+      if (!updated) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      return {
+        id: updated.id,
+        wardEmail: updated.ward_email,
+        wardPhoneNumber: updated.ward_phone_number,
+        isPrimary: false,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateGuardianWard failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update ward', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Delete('/v1/guardian/wards/:wardId')
+  async deleteGuardianWard(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`deleteGuardianWard guardianId=${guardian.id} wardId=${wardId}`);
+
+      // 1차 등록(primary)은 삭제 불가, 연결만 해제
+      if (wardId === guardian.id) {
+        await this.dbService.unlinkPrimaryWard(guardian.id);
+        return {
+          success: true,
+          message: '연결이 해제되었습니다.',
+        };
+      }
+
+      // 추가 등록 삭제
+      const deleted = await this.dbService.deleteGuardianWardRegistration(wardId, guardian.id);
+      if (!deleted) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      return {
+        success: true,
+        message: '연결이 해제되었습니다.',
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`deleteGuardianWard failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to delete ward', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/ward/settings')
+  async getWardSettings(@Headers('authorization') authorization: string | undefined) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'ward') {
+        throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
+      }
+
+      const ward = await this.dbService.findWardByUserId(user.id);
+      if (!ward) {
+        throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`getWardSettings userId=${user.id} wardId=${ward.id}`);
+
+      const notificationSettings = await this.dbService.getNotificationSettings(user.id);
+
+      return {
+        aiPersona: ward.ai_persona,
+        weeklyCallCount: ward.weekly_call_count,
+        callDurationMinutes: ward.call_duration_minutes,
+        notificationSettings: {
+          callReminder: notificationSettings.call_reminder,
+          callComplete: notificationSettings.call_complete,
+          healthAlert: notificationSettings.health_alert,
+        },
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getWardSettings failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get ward settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('/v1/ward/settings')
+  async updateWardSettings(
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body: {
+      aiPersona?: string;
+      weeklyCallCount?: number;
+      callDurationMinutes?: number;
+    },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'ward') {
+        throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
+      }
+
+      const ward = await this.dbService.findWardByUserId(user.id);
+      if (!ward) {
+        throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
+      }
+
+      // 입력값 검증
+      if (body.weeklyCallCount !== undefined && (body.weeklyCallCount < 1 || body.weeklyCallCount > 7)) {
+        throw new HttpException('weeklyCallCount must be between 1 and 7', HttpStatus.BAD_REQUEST);
+      }
+      if (body.callDurationMinutes !== undefined && (body.callDurationMinutes < 5 || body.callDurationMinutes > 60)) {
+        throw new HttpException('callDurationMinutes must be between 5 and 60', HttpStatus.BAD_REQUEST);
+      }
+
+      this.logger.log(`updateWardSettings userId=${user.id} wardId=${ward.id}`);
+
+      const updated = await this.dbService.updateWardSettings({
+        wardId: user.id,
+        aiPersona: body.aiPersona?.trim(),
+        weeklyCallCount: body.weeklyCallCount,
+        callDurationMinutes: body.callDurationMinutes,
+      });
+
+      if (!updated) {
+        throw new HttpException('Failed to update settings', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      return {
+        aiPersona: updated.ai_persona,
+        weeklyCallCount: updated.weekly_call_count,
+        callDurationMinutes: updated.call_duration_minutes,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateWardSettings failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update ward settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   private verifyAuthHeader(authorization: string | undefined) {
     const authHeader = authorization ?? '';
     const token = authHeader.startsWith('Bearer ')
@@ -737,7 +1103,905 @@ export class AppController {
     }
 
     this.logger.log(`endCall callId=${callId}`);
-    return await this.appService.endCall(callId);
+    const result = await this.appService.endCall(callId);
+
+    // 비동기로 보호자에게 통화 완료 알림 전송
+    this.notificationScheduler.notifyCallComplete(callId).catch((error) => {
+      this.logger.warn(`endCall notifyCallComplete failed callId=${callId} error=${(error as Error).message}`);
+    });
+
+    return result;
+  }
+
+  @Post('/v1/calls/:callId/analyze')
+  async analyzeCall(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('callId') callId: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!callId?.trim()) {
+      throw new HttpException('callId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    this.logger.log(`analyzeCall callId=${callId}`);
+
+    try {
+      const result = await this.aiService.analyzeCall(callId);
+      return result;
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('not found')) {
+        throw new HttpException('Call not found', HttpStatus.NOT_FOUND);
+      }
+      this.logger.error(`analyzeCall failed callId=${callId} error=${message}`);
+      throw new HttpException('Failed to analyze call', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Post('/v1/admin/wards/bulk-upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async bulkUploadWards(
+    @Headers('authorization') authorization: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { organizationId?: string },
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!file) {
+      throw new HttpException('file is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const organizationId = body.organizationId?.trim();
+    if (!organizationId) {
+      throw new HttpException('organizationId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    // 파일 크기 제한 (5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      throw new HttpException('File size exceeds 5MB limit', HttpStatus.BAD_REQUEST);
+    }
+
+    // 기관 존재 확인
+    const organization = await this.dbService.findOrganization(organizationId);
+    if (!organization) {
+      throw new HttpException('Organization not found', HttpStatus.NOT_FOUND);
+    }
+
+    this.logger.log(`bulkUploadWards organizationId=${organizationId} fileSize=${file.size}`);
+
+    try {
+      // CSV 파싱
+      const records = parse(file.buffer, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      }) as Array<{
+        email?: string;
+        phone_number?: string;
+        name?: string;
+        birth_date?: string;
+        address?: string;
+      }>;
+
+      const results = {
+        total: records.length,
+        created: 0,
+        skipped: 0,
+        failed: 0,
+        errors: [] as Array<{ row: number; email: string; reason: string }>,
+      };
+
+      for (let i = 0; i < records.length; i++) {
+        const record = records[i];
+        const row = i + 2; // 헤더 제외, 1-indexed
+        const email = record.email?.trim() ?? '';
+
+        try {
+          // 유효성 검증
+          if (!email || !this.isValidEmail(email)) {
+            throw new Error('잘못된 이메일 형식');
+          }
+          if (!record.phone_number?.trim()) {
+            throw new Error('전화번호 필수');
+          }
+          if (!record.name?.trim()) {
+            throw new Error('이름 필수');
+          }
+
+          // 중복 체크
+          const existing = await this.dbService.findOrganizationWard(organizationId, email);
+          if (existing) {
+            results.skipped++;
+            continue;
+          }
+
+          // 저장
+          await this.dbService.createOrganizationWard({
+            organizationId,
+            email,
+            phoneNumber: record.phone_number.trim(),
+            name: record.name.trim(),
+            birthDate: record.birth_date?.trim() || null,
+            address: record.address?.trim() || null,
+          });
+
+          results.created++;
+        } catch (error) {
+          results.failed++;
+          results.errors.push({
+            row,
+            email,
+            reason: (error as Error).message,
+          });
+        }
+      }
+
+      this.logger.log(
+        `bulkUploadWards completed organizationId=${organizationId} total=${results.total} created=${results.created} skipped=${results.skipped} failed=${results.failed}`,
+      );
+
+      return {
+        success: true,
+        ...results,
+      };
+    } catch (error) {
+      this.logger.error(`bulkUploadWards failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to process CSV file', HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  // ============================================================
+  // Location Endpoints
+  // ============================================================
+
+  @Post('/v1/locations')
+  async updateLocation(
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body: {
+      latitude?: number;
+      longitude?: number;
+      accuracy?: number;
+      timestamp?: string;
+    },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    // 위도 검증
+    if (body.latitude === undefined || typeof body.latitude !== 'number') {
+      throw new HttpException('latitude is required', HttpStatus.BAD_REQUEST);
+    }
+    if (body.latitude < -90 || body.latitude > 90) {
+      throw new HttpException('latitude must be between -90 and 90', HttpStatus.BAD_REQUEST);
+    }
+
+    // 경도 검증
+    if (body.longitude === undefined || typeof body.longitude !== 'number') {
+      throw new HttpException('longitude is required', HttpStatus.BAD_REQUEST);
+    }
+    if (body.longitude < -180 || body.longitude > 180) {
+      throw new HttpException('longitude must be between -180 and 180', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'ward') {
+        throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
+      }
+
+      const ward = await this.dbService.findWardByUserId(user.id);
+      if (!ward) {
+        throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
+      }
+
+      const recordedAt = body.timestamp ? new Date(body.timestamp) : new Date();
+      const accuracy = body.accuracy ?? null;
+
+      this.logger.log(
+        `updateLocation wardId=${ward.id} lat=${body.latitude} lng=${body.longitude}`,
+      );
+
+      // 위치 이력 저장
+      await this.dbService.createWardLocation({
+        wardId: ward.id,
+        latitude: body.latitude,
+        longitude: body.longitude,
+        accuracy,
+        recordedAt,
+      });
+
+      // 현재 위치 업데이트
+      const currentLocation = await this.dbService.upsertWardCurrentLocation({
+        wardId: ward.id,
+        latitude: body.latitude,
+        longitude: body.longitude,
+        accuracy,
+      });
+
+      return {
+        success: true,
+        wardId: ward.id,
+        latitude: parseFloat(currentLocation.latitude),
+        longitude: parseFloat(currentLocation.longitude),
+        lastUpdated: currentLocation.last_updated,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateLocation failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update location', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/admin/locations')
+  async getAdminLocations(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('organizationId') organizationId?: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    this.logger.log(`getAdminLocations organizationId=${organizationId ?? 'all'}`);
+
+    try {
+      const locations = await this.dbService.getAllWardCurrentLocations(organizationId);
+
+      return {
+        locations: locations.map((loc) => ({
+          wardId: loc.ward_id,
+          wardName: loc.ward_nickname || loc.ward_name || '이름 없음',
+          latitude: parseFloat(loc.latitude),
+          longitude: parseFloat(loc.longitude),
+          accuracy: loc.accuracy ? parseFloat(loc.accuracy) : null,
+          lastUpdated: loc.last_updated,
+          status: loc.status,
+          organizationId: loc.organization_id,
+        })),
+      };
+    } catch (error) {
+      this.logger.warn(`getAdminLocations failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get locations', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/admin/locations/:wardId/history')
+  async getAdminLocationHistory(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!wardId?.trim()) {
+      throw new HttpException('wardId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    this.logger.log(`getAdminLocationHistory wardId=${wardId} from=${from ?? 'none'} to=${to ?? 'none'}`);
+
+    try {
+      // ward 존재 확인
+      const ward = await this.dbService.findWardById(wardId);
+      if (!ward) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      const history = await this.dbService.getWardLocationHistory({
+        wardId,
+        from: from ? new Date(from) : undefined,
+        to: to ? new Date(to) : undefined,
+        limit: limit ? parseInt(limit, 10) : 100,
+      });
+
+      return {
+        wardId,
+        history: history.map((loc) => ({
+          latitude: parseFloat(loc.latitude),
+          longitude: parseFloat(loc.longitude),
+          accuracy: loc.accuracy ? parseFloat(loc.accuracy) : null,
+          timestamp: loc.recorded_at,
+        })),
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getAdminLocationHistory failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get location history', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('/v1/admin/locations/:wardId/status')
+  async updateAdminLocationStatus(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+    @Body() body: { status?: string },
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!wardId?.trim()) {
+      throw new HttpException('wardId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const status = body.status?.trim();
+    if (!status || !['normal', 'warning', 'emergency'].includes(status)) {
+      throw new HttpException(
+        'status must be one of: normal, warning, emergency',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.logger.log(`updateAdminLocationStatus wardId=${wardId} status=${status}`);
+
+    try {
+      const ward = await this.dbService.findWardById(wardId);
+      if (!ward) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      await this.dbService.updateWardLocationStatus(
+        wardId,
+        status as 'normal' | 'warning' | 'emergency',
+      );
+
+      return {
+        success: true,
+        wardId,
+        status,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateAdminLocationStatus failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update status', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // ============================================================
+  // Emergency Endpoints
+  // ============================================================
+
+  @Post('/v1/emergency')
+  async triggerEmergency(
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body: {
+      type?: 'manual' | 'ai_detected' | 'geofence';
+      latitude?: number;
+      longitude?: number;
+      message?: string;
+    },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    // 타입 검증
+    const emergencyType = body.type || 'manual';
+    if (!['manual', 'ai_detected', 'geofence'].includes(emergencyType)) {
+      throw new HttpException(
+        'type must be one of: manual, ai_detected, geofence',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      // Ward 사용자 확인
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'ward') {
+        throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
+      }
+
+      const ward = await this.dbService.findWardByUserId(user.id);
+      if (!ward) {
+        throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
+      }
+
+      // 위치 정보가 없으면 현재 저장된 위치 사용
+      let latitude = body.latitude;
+      let longitude = body.longitude;
+      if (latitude === undefined || longitude === undefined) {
+        const currentLocation = await this.dbService.getWardCurrentLocation(ward.id);
+        if (currentLocation) {
+          latitude = parseFloat(currentLocation.latitude);
+          longitude = parseFloat(currentLocation.longitude);
+        }
+      }
+
+      this.logger.log(
+        `triggerEmergency wardId=${ward.id} type=${emergencyType} lat=${latitude} lng=${longitude}`,
+      );
+
+      // 1. 비상 상황 생성
+      const emergency = await this.dbService.createEmergency({
+        wardId: ward.id,
+        type: emergencyType,
+        latitude,
+        longitude,
+        message: body.message?.trim(),
+      });
+
+      // 2. 위치 상태를 emergency로 업데이트
+      await this.dbService.updateWardLocationStatus(ward.id, 'emergency');
+
+      // 3. 가까운 관계기관 찾기 (위치가 있을 때만)
+      const nearbyAgencies: Array<{
+        id: string;
+        name: string;
+        type: string;
+        distance: number;
+        contacted: boolean;
+      }> = [];
+
+      if (latitude !== undefined && longitude !== undefined) {
+        const agencies = await this.dbService.findNearbyAgencies(latitude, longitude, 10, 5);
+        for (const agency of agencies) {
+          const distanceKm = parseFloat(agency.distance_km);
+          await this.dbService.createEmergencyContact({
+            emergencyId: emergency.id,
+            agencyId: agency.id,
+            distanceKm,
+            responseStatus: 'pending',
+          });
+          nearbyAgencies.push({
+            id: agency.id,
+            name: agency.name,
+            type: agency.type,
+            distance: Math.round(distanceKm * 10) / 10,
+            contacted: true,
+          });
+        }
+      }
+
+      // 4. 보호자에게 푸시 알림 전송
+      let guardianNotified = false;
+      const wardInfo = await this.dbService.getWardWithGuardianInfo(ward.id);
+      if (wardInfo?.guardian_identity) {
+        try {
+          await this.appService.sendUserPush({
+            identity: wardInfo.guardian_identity,
+            type: 'alert',
+            title: '🚨 비상 알림',
+            body: `${wardInfo.ward_name || '피보호자'}님이 비상 버튼을 눌렀습니다`,
+            payload: {
+              type: 'emergency',
+              emergencyId: emergency.id,
+              wardId: ward.id,
+              latitude,
+              longitude,
+            },
+          });
+          await this.dbService.updateEmergencyGuardianNotified(emergency.id);
+          guardianNotified = true;
+        } catch (pushError) {
+          this.logger.warn(`Emergency guardian push failed: ${(pushError as Error).message}`);
+        }
+      }
+
+      return {
+        emergencyId: emergency.id,
+        status: 'dispatched',
+        nearbyAgencies,
+        guardianNotified,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.error(`triggerEmergency failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to trigger emergency', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Post('/v1/admin/emergency')
+  async triggerAdminEmergency(
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body: {
+      wardId?: string;
+      message?: string;
+    },
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    const wardId = body.wardId?.trim();
+    if (!wardId) {
+      throw new HttpException('wardId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const ward = await this.dbService.findWardById(wardId);
+      if (!ward) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      // 현재 위치 가져오기
+      const currentLocation = await this.dbService.getWardCurrentLocation(wardId);
+      const latitude = currentLocation ? parseFloat(currentLocation.latitude) : undefined;
+      const longitude = currentLocation ? parseFloat(currentLocation.longitude) : undefined;
+
+      this.logger.log(`triggerAdminEmergency wardId=${wardId}`);
+
+      // 1. 비상 상황 생성
+      const emergency = await this.dbService.createEmergency({
+        wardId,
+        type: 'admin',
+        latitude,
+        longitude,
+        message: body.message?.trim(),
+      });
+
+      // 2. 위치 상태를 emergency로 업데이트
+      await this.dbService.updateWardLocationStatus(wardId, 'emergency');
+
+      // 3. 가까운 관계기관 찾기
+      const nearbyAgencies: Array<{
+        id: string;
+        name: string;
+        type: string;
+        distance: number;
+        contacted: boolean;
+      }> = [];
+
+      if (latitude !== undefined && longitude !== undefined) {
+        const agencies = await this.dbService.findNearbyAgencies(latitude, longitude, 10, 5);
+        for (const agency of agencies) {
+          const distanceKm = parseFloat(agency.distance_km);
+          await this.dbService.createEmergencyContact({
+            emergencyId: emergency.id,
+            agencyId: agency.id,
+            distanceKm,
+            responseStatus: 'pending',
+          });
+          nearbyAgencies.push({
+            id: agency.id,
+            name: agency.name,
+            type: agency.type,
+            distance: Math.round(distanceKm * 10) / 10,
+            contacted: true,
+          });
+        }
+      }
+
+      // 4. 보호자에게 푸시 알림 전송
+      let guardianNotified = false;
+      const wardInfo = await this.dbService.getWardWithGuardianInfo(wardId);
+      if (wardInfo?.guardian_identity) {
+        try {
+          await this.appService.sendUserPush({
+            identity: wardInfo.guardian_identity,
+            type: 'alert',
+            title: '🚨 비상 알림',
+            body: `관제센터에서 ${wardInfo.ward_name || '피보호자'}님에 대해 비상 상황을 발동했습니다`,
+            payload: {
+              type: 'emergency',
+              emergencyId: emergency.id,
+              wardId,
+            },
+          });
+          await this.dbService.updateEmergencyGuardianNotified(emergency.id);
+          guardianNotified = true;
+        } catch (pushError) {
+          this.logger.warn(`Admin emergency guardian push failed: ${(pushError as Error).message}`);
+        }
+      }
+
+      return {
+        emergencyId: emergency.id,
+        status: 'dispatched',
+        nearbyAgencies,
+        guardianNotified,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.error(`triggerAdminEmergency failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to trigger emergency', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/admin/emergencies')
+  async getAdminEmergencies(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('status') status?: string,
+    @Query('wardId') wardId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    // status 검증
+    const validStatuses = ['active', 'resolved', 'false_alarm'];
+    if (status && !validStatuses.includes(status)) {
+      throw new HttpException(
+        `status must be one of: ${validStatuses.join(', ')}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.logger.log(`getAdminEmergencies status=${status ?? 'all'} wardId=${wardId ?? 'all'}`);
+
+    try {
+      const emergencies = await this.dbService.getEmergencies({
+        status: status as 'active' | 'resolved' | 'false_alarm' | undefined,
+        wardId: wardId?.trim(),
+        limit: limit ? parseInt(limit, 10) : 50,
+      });
+
+      // 각 비상상황에 연락 기록도 함께 조회
+      const emergenciesWithContacts = await Promise.all(
+        emergencies.map(async (e) => {
+          const contacts = await this.dbService.getEmergencyContacts(e.id);
+          return {
+            id: e.id,
+            wardId: e.ward_id,
+            wardName: e.ward_name || '알 수 없음',
+            type: e.type,
+            status: e.status,
+            latitude: e.latitude ? parseFloat(e.latitude) : null,
+            longitude: e.longitude ? parseFloat(e.longitude) : null,
+            message: e.message,
+            guardianNotified: e.guardian_notified,
+            createdAt: e.created_at,
+            resolvedAt: e.resolved_at,
+            respondedAgencies: contacts.map((c) => c.agency_name),
+          };
+        }),
+      );
+
+      return {
+        emergencies: emergenciesWithContacts,
+      };
+    } catch (error) {
+      this.logger.warn(`getAdminEmergencies failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get emergencies', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/admin/emergencies/:id')
+  async getAdminEmergencyDetail(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') emergencyId: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!emergencyId?.trim()) {
+      throw new HttpException('emergencyId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    this.logger.log(`getAdminEmergencyDetail emergencyId=${emergencyId}`);
+
+    try {
+      const emergency = await this.dbService.getEmergencyById(emergencyId);
+      if (!emergency) {
+        throw new HttpException('Emergency not found', HttpStatus.NOT_FOUND);
+      }
+
+      const contacts = await this.dbService.getEmergencyContacts(emergencyId);
+
+      return {
+        id: emergency.id,
+        wardId: emergency.ward_id,
+        wardName: emergency.ward_name || '알 수 없음',
+        type: emergency.type,
+        status: emergency.status,
+        latitude: emergency.latitude ? parseFloat(emergency.latitude) : null,
+        longitude: emergency.longitude ? parseFloat(emergency.longitude) : null,
+        message: emergency.message,
+        guardianNotified: emergency.guardian_notified,
+        resolvedAt: emergency.resolved_at,
+        resolvedBy: emergency.resolved_by,
+        resolutionNote: emergency.resolution_note,
+        createdAt: emergency.created_at,
+        contacts: contacts.map((c) => ({
+          id: c.id,
+          agencyId: c.agency_id,
+          agencyName: c.agency_name,
+          agencyType: c.agency_type,
+          distanceKm: parseFloat(c.distance_km),
+          responseStatus: c.response_status,
+          contactedAt: c.contacted_at,
+        })),
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getAdminEmergencyDetail failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get emergency detail', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('/v1/admin/emergencies/:id/resolve')
+  async resolveAdminEmergency(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') emergencyId: string,
+    @Body()
+    body: {
+      status?: 'resolved' | 'false_alarm';
+      resolutionNote?: string;
+    },
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!emergencyId?.trim()) {
+      throw new HttpException('emergencyId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const resolveStatus = body.status || 'resolved';
+    if (!['resolved', 'false_alarm'].includes(resolveStatus)) {
+      throw new HttpException(
+        'status must be one of: resolved, false_alarm',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.logger.log(`resolveAdminEmergency emergencyId=${emergencyId} status=${resolveStatus}`);
+
+    try {
+      const emergency = await this.dbService.getEmergencyById(emergencyId);
+      if (!emergency) {
+        throw new HttpException('Emergency not found', HttpStatus.NOT_FOUND);
+      }
+
+      if (emergency.status !== 'active') {
+        throw new HttpException('Emergency is already resolved', HttpStatus.BAD_REQUEST);
+      }
+
+      // 해결자 ID (인증 정보에서)
+      const resolvedBy = auth?.identity || 'admin';
+      // 실제로는 user lookup을 하지만 간단히 처리
+      let resolvedByUserId: string | null = null;
+      try {
+        const user = await this.dbService.upsertUser(resolvedBy);
+        resolvedByUserId = user.id;
+      } catch {
+        // ignore
+      }
+
+      const resolved = await this.dbService.resolveEmergency({
+        emergencyId,
+        resolvedBy: resolvedByUserId || resolvedBy,
+        status: resolveStatus,
+        resolutionNote: body.resolutionNote?.trim(),
+      });
+
+      // 위치 상태를 normal로 복구
+      if (emergency.ward_id) {
+        await this.dbService.updateWardLocationStatus(emergency.ward_id, 'normal');
+      }
+
+      return {
+        success: true,
+        emergencyId: resolved.id,
+        status: resolved.status,
+        resolvedAt: resolved.resolved_at,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`resolveAdminEmergency failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to resolve emergency', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // [관제 대시보드 API] - Issue #17
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /v1/admin/dashboard/stats
+   * 관제 대시보드 전체 통계 조회
+   */
+  @Get('v1/admin/dashboard/stats')
+  async getDashboardStats() {
+    this.logger.log('getDashboardStats called');
+
+    try {
+      const [
+        overview,
+        todayStats,
+        weeklyTrend,
+        moodDistribution,
+        healthAlerts,
+        topKeywords,
+        organizationStats,
+        recentActivity,
+      ] = await Promise.all([
+        this.dbService.getDashboardOverview(),
+        this.dbService.getTodayStats(),
+        this.dbService.getWeeklyTrend(),
+        this.dbService.getMoodDistribution(),
+        this.dbService.getHealthAlertsSummary(),
+        this.dbService.getTopHealthKeywords(10),
+        this.dbService.getOrganizationStats(),
+        this.dbService.getRecentActivity(20),
+      ]);
+
+      return {
+        overview,
+        todayStats,
+        weeklyTrend,
+        moodDistribution,
+        healthAlerts,
+        topKeywords,
+        organizationStats,
+        recentActivity,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.warn(`getDashboardStats failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to fetch dashboard stats', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  /**
+   * GET /v1/admin/dashboard/realtime
+   * 관제 대시보드 실시간 통계 (빈번한 폴링용)
+   */
+  @Get('v1/admin/dashboard/realtime')
+  async getDashboardRealtime() {
+    this.logger.log('getDashboardRealtime called');
+
+    try {
+      const [realtime, recentActivity] = await Promise.all([
+        this.dbService.getRealtimeStats(),
+        this.dbService.getRecentActivity(10),
+      ]);
+
+      return {
+        ...realtime,
+        recentActivity,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.warn(`getDashboardRealtime failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to fetch realtime stats', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  private isValidEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   }
 
   private summarizeToken(token?: string) {
