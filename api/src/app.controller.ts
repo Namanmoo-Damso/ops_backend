@@ -657,6 +657,102 @@ export class AppController {
     }
   }
 
+  @Get('/v1/ward/settings')
+  async getWardSettings(@Headers('authorization') authorization: string | undefined) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'ward') {
+        throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
+      }
+
+      const ward = await this.dbService.findWardByUserId(user.id);
+      if (!ward) {
+        throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`getWardSettings userId=${user.id} wardId=${ward.id}`);
+
+      const notificationSettings = await this.dbService.getNotificationSettings(user.id);
+
+      return {
+        aiPersona: ward.ai_persona,
+        weeklyCallCount: ward.weekly_call_count,
+        callDurationMinutes: ward.call_duration_minutes,
+        notificationSettings: {
+          callReminder: notificationSettings.call_reminder,
+          callComplete: notificationSettings.call_complete,
+          healthAlert: notificationSettings.health_alert,
+        },
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getWardSettings failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get ward settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('/v1/ward/settings')
+  async updateWardSettings(
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body: {
+      aiPersona?: string;
+      weeklyCallCount?: number;
+      callDurationMinutes?: number;
+    },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'ward') {
+        throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
+      }
+
+      const ward = await this.dbService.findWardByUserId(user.id);
+      if (!ward) {
+        throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
+      }
+
+      // 입력값 검증
+      if (body.weeklyCallCount !== undefined && (body.weeklyCallCount < 1 || body.weeklyCallCount > 7)) {
+        throw new HttpException('weeklyCallCount must be between 1 and 7', HttpStatus.BAD_REQUEST);
+      }
+      if (body.callDurationMinutes !== undefined && (body.callDurationMinutes < 5 || body.callDurationMinutes > 60)) {
+        throw new HttpException('callDurationMinutes must be between 5 and 60', HttpStatus.BAD_REQUEST);
+      }
+
+      this.logger.log(`updateWardSettings userId=${user.id} wardId=${ward.id}`);
+
+      const updated = await this.dbService.updateWardSettings({
+        wardId: user.id,
+        aiPersona: body.aiPersona?.trim(),
+        weeklyCallCount: body.weeklyCallCount,
+        callDurationMinutes: body.callDurationMinutes,
+      });
+
+      if (!updated) {
+        throw new HttpException('Failed to update settings', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      return {
+        aiPersona: updated.ai_persona,
+        weeklyCallCount: updated.weekly_call_count,
+        callDurationMinutes: updated.call_duration_minutes,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateWardSettings failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update ward settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   private verifyAuthHeader(authorization: string | undefined) {
     const authHeader = authorization ?? '';
     const token = authHeader.startsWith('Bearer ')
