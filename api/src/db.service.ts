@@ -86,13 +86,16 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     let device: DeviceRow | undefined;
 
     if (params.apnsToken) {
+      // Clear voip_token when supportsCallKit is false (WiFi-only iPad)
+      const clearVoip = supportsCallKit === false && !params.voipToken;
       const result = await this.pool.query<DeviceRow>(
-        `insert into devices (user_id, platform, apns_token, supports_callkit, env, last_seen)
-         values ($1, $2, $3, $4, $5, now())
+        `insert into devices (user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen)
+         values ($1, $2, $3, ${clearVoip ? 'null' : 'null'}, $4, $5, now())
          on conflict (apns_token)
          do update set user_id = excluded.user_id,
            platform = excluded.platform,
            supports_callkit = excluded.supports_callkit,
+           ${clearVoip ? 'voip_token = null,' : ''}
            env = excluded.env,
            last_seen = now()
          returning id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen`,
