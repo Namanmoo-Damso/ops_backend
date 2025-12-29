@@ -52,6 +52,16 @@ type RefreshTokenRow = {
   created_at: string;
 };
 
+type GuardianWardRegistrationRow = {
+  id: string;
+  guardian_id: string;
+  ward_email: string;
+  ward_phone_number: string;
+  linked_ward_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type DeviceRow = {
   id: string;
   user_id: string | null;
@@ -814,5 +824,152 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       [wardId, days.toString()],
     );
     return result.rows;
+  }
+
+  // ============================================================
+  // Guardian Ward Management methods
+  // ============================================================
+
+  async getGuardianWards(guardianId: string) {
+    // 1차 등록 (guardians 테이블) + 추가 등록 (guardian_ward_registrations 테이블)
+    // 연결된 ward 정보도 함께 조회
+    const result = await this.pool.query<{
+      id: string;
+      ward_email: string;
+      ward_phone_number: string;
+      is_primary: boolean;
+      linked_ward_id: string | null;
+      ward_user_id: string | null;
+      ward_nickname: string | null;
+      ward_profile_image_url: string | null;
+      last_call_at: string | null;
+    }>(
+      `-- Primary registration from guardians table
+       select
+         g.id,
+         g.ward_email,
+         g.ward_phone_number,
+         true as is_primary,
+         w.id as linked_ward_id,
+         w.user_id as ward_user_id,
+         u.nickname as ward_nickname,
+         u.profile_image_url as ward_profile_image_url,
+         (select max(c.created_at) from calls c where c.callee_user_id = w.user_id) as last_call_at
+       from guardians g
+       left join wards w on w.guardian_id = g.id
+       left join users u on w.user_id = u.id
+       where g.id = $1
+
+       union all
+
+       -- Additional registrations from guardian_ward_registrations table
+       select
+         gwr.id,
+         gwr.ward_email,
+         gwr.ward_phone_number,
+         false as is_primary,
+         gwr.linked_ward_id,
+         w.user_id as ward_user_id,
+         u.nickname as ward_nickname,
+         u.profile_image_url as ward_profile_image_url,
+         (select max(c.created_at) from calls c where c.callee_user_id = w.user_id) as last_call_at
+       from guardian_ward_registrations gwr
+       left join wards w on gwr.linked_ward_id = w.id
+       left join users u on w.user_id = u.id
+       where gwr.guardian_id = $1
+
+       order by is_primary desc, ward_email`,
+      [guardianId],
+    );
+    return result.rows;
+  }
+
+  async createGuardianWardRegistration(params: {
+    guardianId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    const result = await this.pool.query<GuardianWardRegistrationRow>(
+      `insert into guardian_ward_registrations (guardian_id, ward_email, ward_phone_number, updated_at)
+       values ($1, $2, $3, now())
+       returning id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at`,
+      [params.guardianId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
+  async findGuardianWardRegistration(id: string, guardianId: string) {
+    const result = await this.pool.query<GuardianWardRegistrationRow>(
+      `select id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at
+       from guardian_ward_registrations
+       where id = $1 and guardian_id = $2
+       limit 1`,
+      [id, guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async updateGuardianWardRegistration(params: {
+    id: string;
+    guardianId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    const result = await this.pool.query<GuardianWardRegistrationRow>(
+      `update guardian_ward_registrations
+       set ward_email = $3, ward_phone_number = $4, updated_at = now()
+       where id = $1 and guardian_id = $2
+       returning id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at`,
+      [params.id, params.guardianId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
+  async deleteGuardianWardRegistration(id: string, guardianId: string) {
+    // 연결된 ward가 있으면 guardian_id를 null로 설정
+    await this.pool.query(
+      `update wards
+       set guardian_id = null
+       where id = (
+         select linked_ward_id from guardian_ward_registrations
+         where id = $1 and guardian_id = $2
+       )`,
+      [id, guardianId],
+    );
+
+    // registration 삭제
+    const result = await this.pool.query(
+      `delete from guardian_ward_registrations
+       where id = $1 and guardian_id = $2
+       returning id`,
+      [id, guardianId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async updateGuardianPrimaryWard(params: {
+    guardianId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    // 1차 등록 정보 (guardians 테이블) 수정
+    const result = await this.pool.query<GuardianRow>(
+      `update guardians
+       set ward_email = $2, ward_phone_number = $3, updated_at = now()
+       where id = $1
+       returning id, user_id, ward_email, ward_phone_number, created_at, updated_at`,
+      [params.guardianId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
+  async unlinkPrimaryWard(guardianId: string) {
+    // 1차 등록된 ward의 연결 해제 (wards.guardian_id = null)
+    await this.pool.query(
+      `update wards
+       set guardian_id = null
+       where guardian_id = $1`,
+      [guardianId],
+    );
   }
 }

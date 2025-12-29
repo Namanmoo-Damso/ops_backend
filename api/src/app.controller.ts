@@ -9,6 +9,7 @@ import {
   Logger,
   Param,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { AppService } from './app.service';
@@ -392,6 +393,233 @@ export class AppController {
       }
       this.logger.warn(`getGuardianReport failed error=${(error as Error).message}`);
       throw new HttpException('Failed to get report', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/guardian/wards')
+  async getGuardianWards(@Headers('authorization') authorization: string | undefined) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`getGuardianWards guardianId=${guardian.id}`);
+
+      const wards = await this.dbService.getGuardianWards(guardian.id);
+
+      return {
+        wards: wards.map((w) => ({
+          id: w.id,
+          email: w.ward_email,
+          phoneNumber: w.ward_phone_number,
+          isPrimary: w.is_primary,
+          nickname: w.ward_nickname,
+          profileImageUrl: w.ward_profile_image_url,
+          isLinked: w.linked_ward_id !== null,
+          lastCallAt: w.last_call_at,
+        })),
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getGuardianWards failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get wards', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Post('/v1/guardian/wards')
+  async createGuardianWard(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: { wardEmail?: string; wardPhoneNumber?: string },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    const wardEmail = body.wardEmail?.trim();
+    const wardPhoneNumber = body.wardPhoneNumber?.trim();
+
+    if (!wardEmail) {
+      throw new HttpException('wardEmail is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardPhoneNumber) {
+      throw new HttpException('wardPhoneNumber is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardEmail.includes('@')) {
+      throw new HttpException('Invalid email format', HttpStatus.BAD_REQUEST);
+    }
+    if (!/^[\d-]+$/.test(wardPhoneNumber)) {
+      throw new HttpException('Invalid phone number format', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`createGuardianWard guardianId=${guardian.id} wardEmail=${wardEmail}`);
+
+      const registration = await this.dbService.createGuardianWardRegistration({
+        guardianId: guardian.id,
+        wardEmail,
+        wardPhoneNumber,
+      });
+
+      return {
+        id: registration.id,
+        wardEmail: registration.ward_email,
+        wardPhoneNumber: registration.ward_phone_number,
+        isLinked: false,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`createGuardianWard failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to create ward', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('/v1/guardian/wards/:wardId')
+  async updateGuardianWard(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+    @Body() body: { wardEmail?: string; wardPhoneNumber?: string },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    const wardEmail = body.wardEmail?.trim();
+    const wardPhoneNumber = body.wardPhoneNumber?.trim();
+
+    if (!wardEmail) {
+      throw new HttpException('wardEmail is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardPhoneNumber) {
+      throw new HttpException('wardPhoneNumber is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardEmail.includes('@')) {
+      throw new HttpException('Invalid email format', HttpStatus.BAD_REQUEST);
+    }
+    if (!/^[\d-]+$/.test(wardPhoneNumber)) {
+      throw new HttpException('Invalid phone number format', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`updateGuardianWard guardianId=${guardian.id} wardId=${wardId}`);
+
+      // 1차 등록(primary) 수정인지 확인
+      if (wardId === guardian.id) {
+        const updated = await this.dbService.updateGuardianPrimaryWard({
+          guardianId: guardian.id,
+          wardEmail,
+          wardPhoneNumber,
+        });
+        if (!updated) {
+          throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+        }
+        return {
+          id: updated.id,
+          wardEmail: updated.ward_email,
+          wardPhoneNumber: updated.ward_phone_number,
+          isPrimary: true,
+        };
+      }
+
+      // 추가 등록 수정
+      const updated = await this.dbService.updateGuardianWardRegistration({
+        id: wardId,
+        guardianId: guardian.id,
+        wardEmail,
+        wardPhoneNumber,
+      });
+
+      if (!updated) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      return {
+        id: updated.id,
+        wardEmail: updated.ward_email,
+        wardPhoneNumber: updated.ward_phone_number,
+        isPrimary: false,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateGuardianWard failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update ward', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Delete('/v1/guardian/wards/:wardId')
+  async deleteGuardianWard(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'guardian') {
+        throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
+      }
+
+      const guardian = await this.dbService.findGuardianByUserId(user.id);
+      if (!guardian) {
+        throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`deleteGuardianWard guardianId=${guardian.id} wardId=${wardId}`);
+
+      // 1차 등록(primary)은 삭제 불가, 연결만 해제
+      if (wardId === guardian.id) {
+        await this.dbService.unlinkPrimaryWard(guardian.id);
+        return {
+          success: true,
+          message: '연결이 해제되었습니다.',
+        };
+      }
+
+      // 추가 등록 삭제
+      const deleted = await this.dbService.deleteGuardianWardRegistration(wardId, guardian.id);
+      if (!deleted) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      return {
+        success: true,
+        message: '연결이 해제되었습니다.',
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`deleteGuardianWard failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to delete ward', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
