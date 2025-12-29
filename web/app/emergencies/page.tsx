@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import SidebarLayout from "../../components/SidebarLayout";
 import { LocationMap, type WardLocation } from "../../components/LocationMap";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -36,7 +37,7 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   active: "#ef4444",
   resolved: "#22c55e",
-  false_alarm: "#6b7280",
+  false_alarm: "#64748b",
 };
 
 export default function EmergenciesPage() {
@@ -123,224 +124,235 @@ export default function EmergenciesPage() {
     }));
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif" }}>
-      {/* Sidebar */}
-      <aside
-        style={{
-          width: "400px",
-          backgroundColor: "#f9fafb",
-          borderRight: "1px solid #e5e7eb",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Header */}
-        <div
+    <SidebarLayout>
+      <div style={{ display: "flex", gap: "24px", height: "calc(100vh - 80px)" }}>
+        {/* Emergency List Panel */}
+        <aside
           style={{
-            padding: "16px",
-            borderBottom: "1px solid #e5e7eb",
-            backgroundColor: activeCount > 0 ? "#fef2f2" : "white",
-          }}
-        >
-          <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-            비상 상황 관리
-          </h1>
-          <p
-            style={{
-              margin: "8px 0 0",
-              fontSize: "14px",
-              color: activeCount > 0 ? "#dc2626" : "#6b7280",
-              fontWeight: activeCount > 0 ? "bold" : "normal",
-            }}
-          >
-            {activeCount > 0
-              ? `🚨 진행 중인 비상 상황: ${activeCount}건`
-              : "진행 중인 비상 상황 없음"}
-          </p>
-        </div>
-
-        {/* Filters */}
-        <div
-          style={{
+            width: "420px",
+            backgroundColor: "white",
+            borderRadius: "12px",
+            border: "1px solid #e2e8f0",
             display: "flex",
-            gap: "8px",
-            padding: "12px 16px",
-            borderBottom: "1px solid #e5e7eb",
+            flexDirection: "column",
+            flexShrink: 0,
+            overflow: "hidden",
           }}
         >
-          {["active", "resolved", "false_alarm", ""].map((status) => (
-            <button
-              key={status || "all"}
-              onClick={() => setFilterStatus(status)}
-              style={{
-                padding: "6px 12px",
-                fontSize: "13px",
-                backgroundColor: filterStatus === status ? "#3b82f6" : "#f3f4f6",
-                color: filterStatus === status ? "white" : "#374151",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
-            >
-              {status ? STATUS_LABELS[status] : "전체"}
-            </button>
-          ))}
-        </div>
-
-        {/* Controls */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 16px",
-            borderBottom: "1px solid #e5e7eb",
-          }}
-        >
-          <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <span style={{ fontSize: "14px" }}>자동 새로고침 (10초)</span>
-          </label>
-          <button
-            onClick={fetchEmergencies}
-            style={{
-              padding: "6px 12px",
-              fontSize: "13px",
-              backgroundColor: "#3b82f6",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-            }}
-          >
-            새로고침
-          </button>
-        </div>
-
-        {/* Emergency List */}
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {isLoading ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#6b7280" }}>
-              로딩 중...
-            </div>
-          ) : error ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#ef4444" }}>
-              오류: {error}
-            </div>
-          ) : emergencies.length === 0 ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#6b7280" }}>
-              비상 상황이 없습니다.
-            </div>
-          ) : (
-            emergencies.map((emergency) => (
-              <EmergencyCard
-                key={emergency.id}
-                emergency={emergency}
-                isSelected={emergency.id === selectedEmergencyId}
-                onClick={() => setSelectedEmergencyId(emergency.id)}
-              />
-            ))
-          )}
-        </div>
-
-        {/* Selected Emergency Detail */}
-        {selectedEmergency && (
+          {/* Header */}
           <div
             style={{
-              padding: "16px",
-              borderTop: "1px solid #e5e7eb",
-              backgroundColor: "white",
+              padding: "20px",
+              borderBottom: "1px solid #e2e8f0",
+              backgroundColor: activeCount > 0 ? "#fef2f2" : "white",
             }}
           >
-            <h3 style={{ margin: "0 0 12px", fontSize: "16px" }}>
-              {selectedEmergency.wardName}
-            </h3>
-            <div style={{ fontSize: "13px", color: "#6b7280", lineHeight: "1.8" }}>
-              <div>
-                <strong>유형:</strong> {TYPE_LABELS[selectedEmergency.type]}
-              </div>
-              <div>
-                <strong>발생시각:</strong>{" "}
-                {new Date(selectedEmergency.createdAt).toLocaleString("ko-KR")}
-              </div>
-              {selectedEmergency.message && (
-                <div>
-                  <strong>메시지:</strong> {selectedEmergency.message}
-                </div>
-              )}
-              {selectedEmergency.respondedAgencies.length > 0 && (
-                <div>
-                  <strong>연락기관:</strong> {selectedEmergency.respondedAgencies.join(", ")}
-                </div>
-              )}
-              <div>
-                <strong>보호자 알림:</strong>{" "}
-                {selectedEmergency.guardianNotified ? "완료" : "미발송"}
-              </div>
-            </div>
+            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#1e293b" }}>
+              비상 상황 관리
+            </h2>
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: "14px",
+                color: activeCount > 0 ? "#dc2626" : "#64748b",
+                fontWeight: activeCount > 0 ? 600 : 400,
+              }}
+            >
+              {activeCount > 0
+                ? `진행 중인 비상 상황: ${activeCount}건`
+                : "진행 중인 비상 상황 없음"}
+            </p>
+          </div>
 
-            {selectedEmergency.status === "active" && (
-              <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
-                <button
-                  onClick={() => handleResolve(selectedEmergency.id, "resolved")}
-                  disabled={isResolving}
-                  style={{
-                    flex: 1,
-                    padding: "10px",
-                    fontSize: "14px",
-                    backgroundColor: "#22c55e",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: isResolving ? "not-allowed" : "pointer",
-                    opacity: isResolving ? 0.7 : 1,
-                  }}
-                >
-                  해결 완료
-                </button>
-                <button
-                  onClick={() => handleResolve(selectedEmergency.id, "false_alarm")}
-                  disabled={isResolving}
-                  style={{
-                    flex: 1,
-                    padding: "10px",
-                    fontSize: "14px",
-                    backgroundColor: "#6b7280",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: isResolving ? "not-allowed" : "pointer",
-                    opacity: isResolving ? 0.7 : 1,
-                  }}
-                >
-                  오경보 처리
-                </button>
+          {/* Filters */}
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              padding: "14px 20px",
+              borderBottom: "1px solid #e2e8f0",
+            }}
+          >
+            {["active", "resolved", "false_alarm", ""].map((status) => (
+              <button
+                key={status || "all"}
+                onClick={() => setFilterStatus(status)}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  backgroundColor: filterStatus === status ? "#3b82f6" : "#f1f5f9",
+                  color: filterStatus === status ? "white" : "#475569",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  transition: "all 150ms ease",
+                }}
+              >
+                {status ? STATUS_LABELS[status] : "전체"}
+              </button>
+            ))}
+          </div>
+
+          {/* Controls */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "14px 20px",
+              borderBottom: "1px solid #e2e8f0",
+            }}
+          >
+            <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                style={{ width: "16px", height: "16px", accentColor: "#3b82f6" }}
+              />
+              <span style={{ fontSize: "14px", color: "#475569", fontWeight: 500 }}>자동 새로고침 (10초)</span>
+            </label>
+            <button
+              onClick={fetchEmergencies}
+              style={{
+                padding: "8px 14px",
+                fontSize: "13px",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              새로고침
+            </button>
+          </div>
+
+          {/* Emergency List */}
+          <div style={{ flex: 1, overflow: "auto" }}>
+            {isLoading ? (
+              <div style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
+                로딩 중...
               </div>
+            ) : error ? (
+              <div style={{ padding: "32px", textAlign: "center", color: "#dc2626" }}>
+                오류: {error}
+              </div>
+            ) : emergencies.length === 0 ? (
+              <div style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
+                비상 상황이 없습니다.
+              </div>
+            ) : (
+              emergencies.map((emergency) => (
+                <EmergencyCard
+                  key={emergency.id}
+                  emergency={emergency}
+                  isSelected={emergency.id === selectedEmergencyId}
+                  onClick={() => setSelectedEmergencyId(emergency.id)}
+                />
+              ))
             )}
           </div>
-        )}
-      </aside>
 
-      {/* Map */}
-      <main style={{ flex: 1, position: "relative" }}>
-        <LocationMap
-          locations={mapLocations}
-          onWardClick={(wardId) => {
-            const emergency = emergencies.find(
-              (e) => e.wardId === wardId || e.id === wardId
-            );
-            if (emergency) {
-              setSelectedEmergencyId(emergency.id);
-            }
-          }}
-          selectedWardId={selectedEmergency?.wardId || selectedEmergency?.id}
-        />
-      </main>
-    </div>
+          {/* Selected Emergency Detail */}
+          {selectedEmergency && (
+            <div
+              style={{
+                padding: "20px",
+                borderTop: "1px solid #e2e8f0",
+                backgroundColor: "#f8fafc",
+              }}
+            >
+              <h3 style={{ margin: "0 0 14px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+                {selectedEmergency.wardName}
+              </h3>
+              <div style={{ fontSize: "13px", color: "#475569", lineHeight: "1.9" }}>
+                <div>
+                  <strong style={{ color: "#1e293b" }}>유형:</strong> {TYPE_LABELS[selectedEmergency.type]}
+                </div>
+                <div>
+                  <strong style={{ color: "#1e293b" }}>발생시각:</strong>{" "}
+                  {new Date(selectedEmergency.createdAt).toLocaleString("ko-KR")}
+                </div>
+                {selectedEmergency.message && (
+                  <div>
+                    <strong style={{ color: "#1e293b" }}>메시지:</strong> {selectedEmergency.message}
+                  </div>
+                )}
+                {selectedEmergency.respondedAgencies.length > 0 && (
+                  <div>
+                    <strong style={{ color: "#1e293b" }}>연락기관:</strong> {selectedEmergency.respondedAgencies.join(", ")}
+                  </div>
+                )}
+                <div>
+                  <strong style={{ color: "#1e293b" }}>보호자 알림:</strong>{" "}
+                  {selectedEmergency.guardianNotified ? "완료" : "미발송"}
+                </div>
+              </div>
+
+              {selectedEmergency.status === "active" && (
+                <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
+                  <button
+                    onClick={() => handleResolve(selectedEmergency.id, "resolved")}
+                    disabled={isResolving}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      backgroundColor: "#22c55e",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "8px",
+                      cursor: isResolving ? "not-allowed" : "pointer",
+                      opacity: isResolving ? 0.7 : 1,
+                    }}
+                  >
+                    해결 완료
+                  </button>
+                  <button
+                    onClick={() => handleResolve(selectedEmergency.id, "false_alarm")}
+                    disabled={isResolving}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      backgroundColor: "#64748b",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "8px",
+                      cursor: isResolving ? "not-allowed" : "pointer",
+                      opacity: isResolving ? 0.7 : 1,
+                    }}
+                  >
+                    오경보 처리
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </aside>
+
+        {/* Map */}
+        <main style={{ flex: 1, borderRadius: "12px", overflow: "hidden", border: "1px solid #e2e8f0" }}>
+          <LocationMap
+            locations={mapLocations}
+            onWardClick={(wardId) => {
+              const emergency = emergencies.find(
+                (e) => e.wardId === wardId || e.id === wardId
+              );
+              if (emergency) {
+                setSelectedEmergencyId(emergency.id);
+              }
+            }}
+            selectedWardId={selectedEmergency?.wardId || selectedEmergency?.id}
+          />
+        </main>
+      </div>
+    </SidebarLayout>
   );
 }
 
@@ -363,10 +375,10 @@ function EmergencyCard({
         width: "100%",
         display: "flex",
         alignItems: "flex-start",
-        gap: "12px",
-        padding: "14px 16px",
+        gap: "14px",
+        padding: "16px 20px",
         border: "none",
-        borderBottom: "1px solid #e5e7eb",
+        borderBottom: "1px solid #f1f5f9",
         backgroundColor: isSelected
           ? "#eff6ff"
           : isActive
@@ -374,6 +386,7 @@ function EmergencyCard({
           : "transparent",
         cursor: "pointer",
         textAlign: "left",
+        transition: "background 150ms ease",
       }}
     >
       <div
@@ -393,29 +406,29 @@ function EmergencyCard({
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: "4px",
+            marginBottom: "6px",
           }}
         >
           <span
             style={{
-              fontWeight: isActive ? "bold" : "normal",
+              fontWeight: isActive ? 600 : 500,
               fontSize: "14px",
-              color: isActive ? "#dc2626" : "#374151",
+              color: isActive ? "#dc2626" : "#1e293b",
             }}
           >
             {emergency.wardName}
           </span>
-          <span style={{ fontSize: "12px", color: "#6b7280" }}>{timeAgo}</span>
+          <span style={{ fontSize: "12px", color: "#64748b" }}>{timeAgo}</span>
         </div>
-        <div style={{ fontSize: "12px", color: "#6b7280" }}>
+        <div style={{ fontSize: "12px", color: "#64748b" }}>
           {TYPE_LABELS[emergency.type]} | {STATUS_LABELS[emergency.status]}
         </div>
         {emergency.respondedAgencies.length > 0 && (
           <div
             style={{
               fontSize: "11px",
-              color: "#9ca3af",
-              marginTop: "4px",
+              color: "#94a3b8",
+              marginTop: "6px",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",

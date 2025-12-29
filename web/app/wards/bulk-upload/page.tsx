@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
+import SidebarLayout from "../../../components/SidebarLayout";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -191,41 +192,20 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "#f3f4f6",
-        fontFamily: "sans-serif",
-      }}
-    >
-      {/* Header */}
-      <header
-        style={{
-          backgroundColor: "white",
-          borderBottom: "1px solid #e5e7eb",
-          padding: "16px 24px",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "20px", fontWeight: "bold" }}>
-          피보호자 일괄 등록
-        </h1>
-        <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280" }}>
-          CSV 파일로 피보호자를 일괄 등록할 수 있습니다.
-        </p>
-      </header>
-
-      <main style={{ padding: "24px", maxWidth: "800px", margin: "0 auto" }}>
+    <SidebarLayout title="피보호자 일괄 등록">
+      <div style={{ maxWidth: "800px" }}>
         {/* Error Message */}
         {error && (
           <div
             style={{
-              padding: "12px 16px",
+              padding: "14px 18px",
               marginBottom: "24px",
               backgroundColor: "#fef2f2",
-              border: "1px solid #fecaca",
-              borderRadius: "8px",
+              border: "1px solid #fca5a5",
+              borderRadius: "10px",
               color: "#dc2626",
               fontSize: "14px",
+              fontWeight: 500,
             }}
           >
             {error}
@@ -239,7 +219,7 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
               backgroundColor: "white",
               borderRadius: "12px",
               padding: "32px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+              border: "1px solid #e2e8f0",
             }}
           >
             <div
@@ -247,40 +227,44 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
               style={{
                 border: `2px dashed ${isDragActive ? "#3b82f6" : "#d1d5db"}`,
                 borderRadius: "12px",
-                padding: "48px 24px",
+                padding: "56px 24px",
                 textAlign: "center",
                 cursor: "pointer",
-                backgroundColor: isDragActive ? "#eff6ff" : "#f9fafb",
+                backgroundColor: isDragActive ? "#eff6ff" : "#f8fafc",
                 transition: "all 0.2s",
               }}
             >
               <input {...getInputProps()} />
-              <div style={{ fontSize: "48px", marginBottom: "16px" }}>📁</div>
-              <p style={{ fontSize: "16px", color: "#374151", marginBottom: "8px" }}>
+              <div style={{ fontSize: "52px", marginBottom: "18px" }}>📁</div>
+              <p style={{ fontSize: "16px", color: "#1e293b", marginBottom: "8px", fontWeight: 500 }}>
                 {isDragActive
                   ? "파일을 놓으세요..."
                   : "파일을 드래그하거나 클릭하여 선택"}
               </p>
-              <p style={{ fontSize: "14px", color: "#6b7280" }}>
+              <p style={{ fontSize: "14px", color: "#64748b" }}>
                 CSV 파일만 업로드 가능합니다
               </p>
             </div>
 
-            <div style={{ marginTop: "24px", textAlign: "center" }}>
+            <div style={{ marginTop: "28px", textAlign: "center" }}>
               <button
                 onClick={downloadSampleCSV}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "8px",
-                  padding: "10px 16px",
+                  padding: "12px 20px",
                   backgroundColor: "white",
-                  border: "1px solid #d1d5db",
-                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "10px",
                   fontSize: "14px",
-                  color: "#374151",
+                  color: "#475569",
                   cursor: "pointer",
+                  fontWeight: 500,
+                  transition: "all 150ms ease",
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "white")}
               >
                 📥 샘플 CSV 다운로드
               </button>
@@ -288,21 +272,23 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
 
             <div
               style={{
-                marginTop: "24px",
-                padding: "16px",
-                backgroundColor: "#f9fafb",
-                borderRadius: "8px",
+                marginTop: "28px",
+                padding: "18px",
+                backgroundColor: "#f8fafc",
+                borderRadius: "10px",
+                border: "1px solid #e2e8f0",
               }}
             >
-              <p style={{ margin: 0, fontSize: "14px", fontWeight: "bold", color: "#374151" }}>
+              <p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1e293b" }}>
                 CSV 형식
               </p>
               <code
                 style={{
                   display: "block",
-                  marginTop: "8px",
+                  marginTop: "10px",
                   fontSize: "13px",
-                  color: "#6b7280",
+                  color: "#475569",
+                  fontFamily: "monospace",
                 }}
               >
                 email, phone_number, name, birth_date, address
@@ -317,24 +303,24 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             style={{
               backgroundColor: "white",
               borderRadius: "12px",
-              padding: "24px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+              padding: "28px",
+              border: "1px solid #e2e8f0",
             }}
           >
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "12px",
-                marginBottom: "20px",
+                gap: "14px",
+                marginBottom: "24px",
               }}
             >
-              <span style={{ fontSize: "24px" }}>📄</span>
+              <span style={{ fontSize: "28px" }}>📄</span>
               <div>
-                <p style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>
+                <p style={{ margin: 0, fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
                   {file?.name}
                 </p>
-                <p style={{ margin: 0, fontSize: "14px", color: "#6b7280" }}>
+                <p style={{ margin: 0, fontSize: "14px", color: "#64748b" }}>
                   {previewData.length}명 감지됨
                 </p>
               </div>
@@ -344,9 +330,9 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             <div
               style={{
                 overflow: "auto",
-                maxHeight: "300px",
-                border: "1px solid #e5e7eb",
-                borderRadius: "8px",
+                maxHeight: "320px",
+                border: "1px solid #e2e8f0",
+                borderRadius: "10px",
               }}
             >
               <table
@@ -357,14 +343,14 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
                 }}
               >
                 <thead>
-                  <tr style={{ backgroundColor: "#f9fafb" }}>
-                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    <th style={{ padding: "14px 16px", textAlign: "left", borderBottom: "1px solid #e2e8f0", color: "#475569", fontWeight: 600 }}>
                       이메일
                     </th>
-                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ padding: "14px 16px", textAlign: "left", borderBottom: "1px solid #e2e8f0", color: "#475569", fontWeight: 600 }}>
                       전화번호
                     </th>
-                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ padding: "14px 16px", textAlign: "left", borderBottom: "1px solid #e2e8f0", color: "#475569", fontWeight: 600 }}>
                       이름
                     </th>
                   </tr>
@@ -372,13 +358,13 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
                 <tbody>
                   {previewData.slice(0, 10).map((row, i) => (
                     <tr key={i}>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "14px 16px", borderBottom: "1px solid #f1f5f9", color: "#1e293b" }}>
                         {row.email}
                       </td>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "14px 16px", borderBottom: "1px solid #f1f5f9", color: "#1e293b" }}>
                         {row.phone_number}
                       </td>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "14px 16px", borderBottom: "1px solid #f1f5f9", color: "#1e293b" }}>
                         {row.name}
                       </td>
                     </tr>
@@ -388,7 +374,7 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             </div>
 
             {previewData.length > 10 && (
-              <p style={{ marginTop: "12px", fontSize: "14px", color: "#6b7280", textAlign: "center" }}>
+              <p style={{ marginTop: "14px", fontSize: "14px", color: "#64748b", textAlign: "center" }}>
                 ... 외 {previewData.length - 10}명
               </p>
             )}
@@ -399,19 +385,20 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
                 display: "flex",
                 justifyContent: "flex-end",
                 gap: "12px",
-                marginTop: "24px",
+                marginTop: "28px",
               }}
             >
               <button
                 onClick={handleReset}
                 style={{
-                  padding: "12px 24px",
+                  padding: "12px 28px",
                   backgroundColor: "white",
-                  border: "1px solid #d1d5db",
-                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "10px",
                   fontSize: "14px",
-                  color: "#374151",
+                  color: "#475569",
                   cursor: "pointer",
+                  fontWeight: 500,
                 }}
               >
                 취소
@@ -419,13 +406,14 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
               <button
                 onClick={handleUpload}
                 style={{
-                  padding: "12px 24px",
+                  padding: "12px 28px",
                   backgroundColor: "#3b82f6",
                   border: "none",
-                  borderRadius: "8px",
+                  borderRadius: "10px",
                   fontSize: "14px",
                   color: "white",
                   cursor: "pointer",
+                  fontWeight: 600,
                 }}
               >
                 업로드
@@ -440,13 +428,13 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             style={{
               backgroundColor: "white",
               borderRadius: "12px",
-              padding: "48px 24px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+              padding: "56px 28px",
+              border: "1px solid #e2e8f0",
               textAlign: "center",
             }}
           >
-            <div style={{ fontSize: "48px", marginBottom: "16px" }}>⏳</div>
-            <p style={{ fontSize: "16px", color: "#374151", marginBottom: "24px" }}>
+            <div style={{ fontSize: "52px", marginBottom: "18px" }}>⏳</div>
+            <p style={{ fontSize: "16px", color: "#1e293b", marginBottom: "28px", fontWeight: 500 }}>
               업로드 중...
             </p>
 
@@ -454,10 +442,10 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             <div
               style={{
                 width: "100%",
-                maxWidth: "400px",
-                height: "8px",
-                backgroundColor: "#e5e7eb",
-                borderRadius: "4px",
+                maxWidth: "420px",
+                height: "10px",
+                backgroundColor: "#e2e8f0",
+                borderRadius: "5px",
                 margin: "0 auto",
                 overflow: "hidden",
               }}
@@ -471,7 +459,7 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
                 }}
               />
             </div>
-            <p style={{ marginTop: "12px", fontSize: "14px", color: "#6b7280" }}>
+            <p style={{ marginTop: "14px", fontSize: "14px", color: "#64748b", fontWeight: 500 }}>
               {uploadProgress}%
             </p>
           </div>
@@ -483,15 +471,15 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             style={{
               backgroundColor: "white",
               borderRadius: "12px",
-              padding: "32px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+              padding: "36px",
+              border: "1px solid #e2e8f0",
             }}
           >
-            <div style={{ textAlign: "center", marginBottom: "24px" }}>
-              <div style={{ fontSize: "48px", marginBottom: "16px" }}>
+            <div style={{ textAlign: "center", marginBottom: "28px" }}>
+              <div style={{ fontSize: "52px", marginBottom: "18px" }}>
                 {result.failed === 0 ? "✅" : "⚠️"}
               </div>
-              <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "bold" }}>
+              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#1e293b" }}>
                 업로드 완료
               </h2>
             </div>
@@ -501,52 +489,55 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(3, 1fr)",
-                gap: "16px",
-                marginBottom: "24px",
+                gap: "18px",
+                marginBottom: "28px",
               }}
             >
               <div
                 style={{
-                  padding: "16px",
+                  padding: "20px",
                   backgroundColor: "#f0fdf4",
-                  borderRadius: "8px",
+                  borderRadius: "10px",
                   textAlign: "center",
+                  border: "1px solid #bbf7d0",
                 }}
               >
-                <p style={{ margin: 0, fontSize: "24px", fontWeight: "bold", color: "#22c55e" }}>
+                <p style={{ margin: 0, fontSize: "28px", fontWeight: 700, color: "#22c55e" }}>
                   {result.created}
                 </p>
-                <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280" }}>
+                <p style={{ margin: "6px 0 0", fontSize: "14px", color: "#475569", fontWeight: 500 }}>
                   성공
                 </p>
               </div>
               <div
                 style={{
-                  padding: "16px",
+                  padding: "20px",
                   backgroundColor: "#fefce8",
-                  borderRadius: "8px",
+                  borderRadius: "10px",
                   textAlign: "center",
+                  border: "1px solid #fef08a",
                 }}
               >
-                <p style={{ margin: 0, fontSize: "24px", fontWeight: "bold", color: "#eab308" }}>
+                <p style={{ margin: 0, fontSize: "28px", fontWeight: 700, color: "#eab308" }}>
                   {result.skipped}
                 </p>
-                <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280" }}>
+                <p style={{ margin: "6px 0 0", fontSize: "14px", color: "#475569", fontWeight: 500 }}>
                   건너뜀
                 </p>
               </div>
               <div
                 style={{
-                  padding: "16px",
+                  padding: "20px",
                   backgroundColor: "#fef2f2",
-                  borderRadius: "8px",
+                  borderRadius: "10px",
                   textAlign: "center",
+                  border: "1px solid #fecaca",
                 }}
               >
-                <p style={{ margin: 0, fontSize: "24px", fontWeight: "bold", color: "#ef4444" }}>
+                <p style={{ margin: 0, fontSize: "28px", fontWeight: 700, color: "#ef4444" }}>
                   {result.failed}
                 </p>
-                <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280" }}>
+                <p style={{ margin: "6px 0 0", fontSize: "14px", color: "#475569", fontWeight: 500 }}>
                   실패
                 </p>
               </div>
@@ -556,30 +547,31 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             {result.errors.length > 0 && (
               <div
                 style={{
-                  marginBottom: "24px",
-                  padding: "16px",
+                  marginBottom: "28px",
+                  padding: "20px",
                   backgroundColor: "#fef2f2",
-                  borderRadius: "8px",
+                  borderRadius: "10px",
+                  border: "1px solid #fecaca",
                 }}
               >
-                <p style={{ margin: "0 0 12px", fontSize: "14px", fontWeight: "bold", color: "#dc2626" }}>
+                <p style={{ margin: "0 0 14px", fontSize: "14px", fontWeight: 600, color: "#dc2626" }}>
                   실패 상세
                 </p>
-                <div style={{ maxHeight: "150px", overflow: "auto" }}>
+                <div style={{ maxHeight: "160px", overflow: "auto" }}>
                   {result.errors.slice(0, 10).map((err, i) => (
                     <p
                       key={i}
                       style={{
-                        margin: "4px 0",
+                        margin: "6px 0",
                         fontSize: "13px",
-                        color: "#374151",
+                        color: "#475569",
                       }}
                     >
                       - {err.row}행: {err.email} - {err.reason}
                     </p>
                   ))}
                   {result.errors.length > 10 && (
-                    <p style={{ margin: "8px 0 0", fontSize: "13px", color: "#6b7280" }}>
+                    <p style={{ margin: "10px 0 0", fontSize: "13px", color: "#64748b" }}>
                       ... 외 {result.errors.length - 10}건
                     </p>
                   )}
@@ -588,17 +580,18 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
                 <button
                   onClick={downloadErrorsCSV}
                   style={{
-                    marginTop: "12px",
+                    marginTop: "14px",
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "8px",
-                    padding: "8px 12px",
+                    padding: "10px 16px",
                     backgroundColor: "white",
-                    border: "1px solid #fecaca",
-                    borderRadius: "6px",
+                    border: "1px solid #fca5a5",
+                    borderRadius: "8px",
                     fontSize: "13px",
                     color: "#dc2626",
                     cursor: "pointer",
+                    fontWeight: 500,
                   }}
                 >
                   📥 실패 목록 다운로드
@@ -611,13 +604,14 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
               <button
                 onClick={handleReset}
                 style={{
-                  padding: "12px 32px",
+                  padding: "14px 36px",
                   backgroundColor: "#3b82f6",
                   border: "none",
-                  borderRadius: "8px",
-                  fontSize: "14px",
+                  borderRadius: "10px",
+                  fontSize: "15px",
                   color: "white",
                   cursor: "pointer",
+                  fontWeight: 600,
                 }}
               >
                 확인
@@ -625,7 +619,7 @@ ward3@example.com,010-3456-7890,이순자,1952-11-08,대구시 수성구`;
             </div>
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </SidebarLayout>
   );
 }

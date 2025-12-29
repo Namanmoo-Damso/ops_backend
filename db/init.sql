@@ -250,11 +250,13 @@ create index if not exists idx_call_schedules_is_active on call_schedules(is_act
 create table if not exists organization_wards (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid references organizations(id) on delete cascade,
+  uploaded_by_admin_id uuid references admins(id) on delete set null,  -- 등록한 관리자
   email text not null,
   phone_number text not null,
   name text not null,
   birth_date date,
   address text,
+  notes text,  -- 관리자 메모
   is_registered boolean not null default false,  -- 앱 가입 완료 여부
   ward_id uuid references wards(id) on delete set null,  -- 가입 후 연결
   created_at timestamptz not null default now(),
@@ -266,6 +268,7 @@ create table if not exists organization_wards (
 create index if not exists idx_org_wards_org_id on organization_wards(organization_id);
 create index if not exists idx_org_wards_email on organization_wards(email);
 create index if not exists idx_org_wards_is_registered on organization_wards(is_registered);
+create index if not exists idx_org_wards_uploaded_by on organization_wards(uploaded_by_admin_id);
 
 -- =============================================================================
 -- 16. WARD_LOCATIONS (피보호자 위치 이력)
