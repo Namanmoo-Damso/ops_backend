@@ -456,6 +456,20 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     return result.rows[0];
   }
 
+  async createGuardian(params: {
+    userId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    const result = await this.pool.query<GuardianRow>(
+      `insert into guardians (user_id, ward_email, ward_phone_number, updated_at)
+       values ($1, $2, $3, now())
+       returning id, user_id, ward_email, ward_phone_number, created_at, updated_at`,
+      [params.userId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
   async saveRefreshToken(params: {
     userId: string;
     tokenHash: string;
