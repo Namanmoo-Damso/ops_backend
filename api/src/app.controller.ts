@@ -10,16 +10,55 @@ import {
   Post,
 } from '@nestjs/common';
 import { AppService } from './app.service';
+import { AuthService } from './auth.service';
 
 @Controller()
 export class AppController {
   private readonly logger = new Logger(AppController.name);
 
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly appService: AppService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Get('/healthz')
   getHealth() {
     return { status: 'ok', ts: new Date().toISOString() };
+  }
+
+  @Post('/v1/auth/kakao')
+  async authKakao(
+    @Body()
+    body: {
+      kakaoAccessToken?: string;
+      userType?: 'guardian' | 'ward';
+    },
+  ) {
+    const kakaoAccessToken = body.kakaoAccessToken?.trim();
+    if (!kakaoAccessToken) {
+      throw new HttpException(
+        'kakaoAccessToken is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      this.logger.log(`authKakao userType=${body.userType ?? 'none'}`);
+      const result = await this.authService.kakaoLogin({
+        kakaoAccessToken,
+        userType: body.userType,
+      });
+      return result;
+    } catch (error) {
+      if ((error as HttpException).getStatus?.() === HttpStatus.UNAUTHORIZED) {
+        throw error;
+      }
+      this.logger.warn(`authKakao failed error=${(error as Error).message}`);
+      throw new HttpException(
+        (error as Error).message || 'Authentication failed',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
   }
 
   @Get('/v1/rooms/:roomName/members')
