@@ -273,6 +273,41 @@ export class AuthService {
     }
   }
 
+  async refreshTokens(refreshToken: string): Promise<AuthTokens> {
+    // 1. Refresh Token JWT 검증
+    let payload: TokenPayload;
+    try {
+      payload = jwt.verify(refreshToken, this.jwtSecret) as TokenPayload;
+      if (payload.type !== 'refresh') {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // 2. DB에서 토큰 확인
+    const tokenHash = this.hashToken(refreshToken);
+    const storedToken = await this.dbService.findRefreshToken(tokenHash);
+    if (!storedToken) {
+      this.logger.warn(`refreshTokens token not found userId=${payload.sub}`);
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // 3. 사용자 확인
+    const user = await this.dbService.findUserById(payload.sub);
+    if (!user) {
+      this.logger.warn(`refreshTokens user not found userId=${payload.sub}`);
+      throw new UnauthorizedException('User not found');
+    }
+
+    // 4. 기존 토큰 무효화 (Token Rotation)
+    await this.dbService.deleteRefreshToken(tokenHash);
+
+    // 5. 새 토큰 발급
+    this.logger.log(`refreshTokens userId=${user.id}`);
+    return this.issueTokens(user.id, user.user_type as UserType | null);
+  }
+
   private hashToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
