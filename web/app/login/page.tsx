@@ -40,6 +40,15 @@ function LoginContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 초기화 로깅
+  useEffect(() => {
+    console.log("[Login] Component initialized");
+    console.log("[Login] API_BASE:", API_BASE);
+    console.log("[Login] KAKAO_CLIENT_ID:", KAKAO_CLIENT_ID ? "set" : "NOT SET");
+    console.log("[Login] GOOGLE_CLIENT_ID:", GOOGLE_CLIENT_ID ? "set" : "NOT SET");
+    console.log("[Login] searchParams:", Object.fromEntries(searchParams.entries()));
+  }, [searchParams]);
+
   // 이미 로그인되어 있으면 대시보드로 이동
   useEffect(() => {
     const accessToken = localStorage.getItem("admin_access_token");
@@ -69,100 +78,99 @@ function LoginContent() {
     setError(null);
 
     try {
-      // OAuth code를 access token으로 교환
-      const accessToken = await exchangeCodeForToken(provider, code);
+      // 서버 측에서 authorization code를 access token으로 교환하고 로그인 처리
+      const redirectUri = `${window.location.origin}/login/callback?provider=${provider}`;
+      console.log("[Login] OAuth callback:", { provider, code: code.substring(0, 10) + "...", redirectUri });
 
-      // 서버에 OAuth 로그인 요청
-      const response = await fetch(`${API_BASE}/admin/auth/oauth`, {
+      const response = await fetch(`${API_BASE}/admin/auth/oauth/code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, accessToken }),
+        body: JSON.stringify({ provider, code, redirectUri }),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      console.log("[Login] Response status:", response.status, "body:", responseText);
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        console.error("[Login] Failed to parse response as JSON:", responseText);
+        throw new Error(`Invalid JSON response: ${responseText.substring(0, 100)}`);
+      }
 
       if (!response.ok) {
-        throw new Error(data.message || "로그인에 실패했습니다.");
+        throw new Error(data.message || `HTTP ${response.status}: 로그인에 실패했습니다.`);
       }
 
       // 토큰 저장
+      console.log("[Login] Login successful, saving tokens");
       localStorage.setItem("admin_access_token", data.accessToken);
       localStorage.setItem("admin_refresh_token", data.refreshToken);
       localStorage.setItem("admin_info", JSON.stringify(data.admin));
 
-      // 대시보드로 이동
-      router.replace("/dashboard");
+      // 조직이 없으면 조직 선택 페이지로, 있으면 대시보드로 이동
+      if (!data.admin.organizationId) {
+        router.replace("/select-organization");
+      } else {
+        router.replace("/dashboard");
+      }
     } catch (err) {
+      console.error("[Login] OAuth error:", err);
       setError((err as Error).message);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const exchangeCodeForToken = async (
-    provider: string,
-    code: string
-  ): Promise<string> => {
-    // 실제로는 서버에서 처리해야 함 (client secret 노출 방지)
-    // 여기서는 간단히 클라이언트에서 처리하는 예시
-    // 프로덕션에서는 /admin/auth/oauth 엔드포인트에서 code를 직접 받아 처리
-
-    if (provider === "kakao") {
-      const response = await fetch("https://kauth.kakao.com/oauth/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          client_id: KAKAO_CLIENT_ID,
-          redirect_uri: REDIRECT_URI,
-          code,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error("카카오 토큰 발급 실패");
-      }
-      return data.access_token;
-    } else if (provider === "google") {
-      // Google은 implicit flow 사용시 바로 access_token이 옴
-      // Authorization code flow시 서버에서 처리 필요
-      return code; // 임시로 code를 그대로 반환
-    }
-
-    throw new Error("Unknown provider");
-  };
-
   const handleKakaoLogin = () => {
-    if (!KAKAO_CLIENT_ID) {
-      setError("카카오 클라이언트 ID가 설정되지 않았습니다.");
-      return;
+    try {
+      console.log("[Login] Kakao login clicked, client_id:", KAKAO_CLIENT_ID ? "set" : "NOT SET");
+      console.log("[Login] REDIRECT_URI:", REDIRECT_URI);
+
+      if (!KAKAO_CLIENT_ID) {
+        setError("카카오 클라이언트 ID가 설정되지 않았습니다.");
+        return;
+      }
+
+      const kakaoAuthUrl = new URL("https://kauth.kakao.com/oauth/authorize");
+      kakaoAuthUrl.searchParams.set("client_id", KAKAO_CLIENT_ID);
+      kakaoAuthUrl.searchParams.set("redirect_uri", `${REDIRECT_URI}?provider=kakao`);
+      kakaoAuthUrl.searchParams.set("response_type", "code");
+      kakaoAuthUrl.searchParams.set("scope", "profile_nickname,account_email");
+
+      console.log("[Login] Redirecting to Kakao:", kakaoAuthUrl.toString());
+      window.location.href = kakaoAuthUrl.toString();
+    } catch (err) {
+      console.error("[Login] Kakao login error:", err);
+      setError((err as Error).message);
     }
-
-    const kakaoAuthUrl = new URL("https://kauth.kakao.com/oauth/authorize");
-    kakaoAuthUrl.searchParams.set("client_id", KAKAO_CLIENT_ID);
-    kakaoAuthUrl.searchParams.set("redirect_uri", `${REDIRECT_URI}?provider=kakao`);
-    kakaoAuthUrl.searchParams.set("response_type", "code");
-    kakaoAuthUrl.searchParams.set("scope", "profile_nickname,account_email");
-
-    window.location.href = kakaoAuthUrl.toString();
   };
 
   const handleGoogleLogin = () => {
-    if (!GOOGLE_CLIENT_ID) {
-      setError("Google 클라이언트 ID가 설정되지 않았습니다.");
-      return;
+    try {
+      console.log("[Login] Google login clicked, client_id:", GOOGLE_CLIENT_ID ? "set" : "NOT SET");
+      console.log("[Login] REDIRECT_URI:", REDIRECT_URI);
+
+      if (!GOOGLE_CLIENT_ID) {
+        setError("Google 클라이언트 ID가 설정되지 않았습니다.");
+        return;
+      }
+
+      const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      googleAuthUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
+      googleAuthUrl.searchParams.set("redirect_uri", `${REDIRECT_URI}?provider=google`);
+      googleAuthUrl.searchParams.set("response_type", "code");
+      googleAuthUrl.searchParams.set("scope", "email profile");
+      googleAuthUrl.searchParams.set("access_type", "offline");
+      googleAuthUrl.searchParams.set("prompt", "consent");
+
+      console.log("[Login] Redirecting to Google:", googleAuthUrl.toString());
+      window.location.href = googleAuthUrl.toString();
+    } catch (err) {
+      console.error("[Login] Google login error:", err);
+      setError((err as Error).message);
     }
-
-    const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    googleAuthUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
-    googleAuthUrl.searchParams.set("redirect_uri", `${REDIRECT_URI}?provider=google`);
-    googleAuthUrl.searchParams.set("response_type", "code");
-    googleAuthUrl.searchParams.set("scope", "email profile");
-    googleAuthUrl.searchParams.set("access_type", "offline");
-    googleAuthUrl.searchParams.set("prompt", "consent");
-
-    window.location.href = googleAuthUrl.toString();
   };
 
   return (
@@ -293,19 +301,6 @@ function LoginContent() {
           </div>
         )}
 
-        {/* Info */}
-        <p
-          style={{
-            marginTop: "32px",
-            textAlign: "center",
-            fontSize: "12px",
-            color: "#9ca3af",
-          }}
-        >
-          관리자 권한이 필요합니다.
-          <br />
-          첫 로그인시 super_admin 승인이 필요합니다.
-        </p>
       </div>
     </div>
   );

@@ -1293,6 +1293,52 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     return result.rows[0];
   }
 
+  async listAllOrganizations() {
+    const result = await this.pool.query<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>(
+      `select id, name, created_at from organizations order by name`,
+    );
+    return result.rows;
+  }
+
+  async findOrCreateOrganization(name: string) {
+    // 먼저 기존 조직 찾기
+    const existing = await this.pool.query<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>(
+      `select id, name, created_at from organizations where name = $1`,
+      [name],
+    );
+
+    if (existing.rows[0]) {
+      return { organization: existing.rows[0], created: false };
+    }
+
+    // 없으면 새로 생성
+    const result = await this.pool.query<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>(
+      `insert into organizations (name) values ($1) returning id, name, created_at`,
+      [name],
+    );
+
+    return { organization: result.rows[0], created: true };
+  }
+
+  async updateAdminOrganization(adminId: string, organizationId: string) {
+    await this.pool.query(
+      `update admins set organization_id = $1, updated_at = now() where id = $2`,
+      [organizationId, adminId],
+    );
+  }
+
   async findOrganizationWard(organizationId: string, email: string) {
     const result = await this.pool.query<{
       id: string;
@@ -1315,28 +1361,34 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     name: string;
     birthDate: string | null;
     address: string | null;
+    uploadedByAdminId?: string;
+    notes?: string;
   }) {
     const result = await this.pool.query<{
       id: string;
       organization_id: string;
+      uploaded_by_admin_id: string | null;
       email: string;
       phone_number: string;
       name: string;
       birth_date: string | null;
       address: string | null;
+      notes: string | null;
       is_registered: boolean;
       created_at: string;
     }>(
-      `insert into organization_wards (organization_id, email, phone_number, name, birth_date, address)
-       values ($1, $2, $3, $4, $5, $6)
-       returning id, organization_id, email, phone_number, name, birth_date, address, is_registered, created_at`,
+      `insert into organization_wards (organization_id, uploaded_by_admin_id, email, phone_number, name, birth_date, address, notes)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       returning id, organization_id, uploaded_by_admin_id, email, phone_number, name, birth_date, address, notes, is_registered, created_at`,
       [
         params.organizationId,
+        params.uploadedByAdminId ?? null,
         params.email,
         params.phoneNumber,
         params.name,
         params.birthDate,
         params.address,
+        params.notes ?? null,
       ],
     );
     return result.rows[0];
@@ -1350,17 +1402,90 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       name: string;
       birth_date: string | null;
       address: string | null;
+      notes: string | null;
       is_registered: boolean;
       ward_id: string | null;
+      uploaded_by_admin_id: string | null;
       created_at: string;
     }>(
-      `select id, email, phone_number, name, birth_date, address, is_registered, ward_id, created_at
+      `select id, email, phone_number, name, birth_date, address, notes, is_registered, ward_id, uploaded_by_admin_id, created_at
        from organization_wards
        where organization_id = $1
        order by created_at desc`,
       [organizationId],
     );
     return result.rows;
+  }
+
+  async getMyManagedWards(adminId: string) {
+    const result = await this.pool.query<{
+      id: string;
+      organization_id: string;
+      organization_name: string;
+      email: string;
+      phone_number: string;
+      name: string;
+      birth_date: string | null;
+      address: string | null;
+      notes: string | null;
+      is_registered: boolean;
+      ward_id: string | null;
+      created_at: string;
+      last_call_at: string | null;
+      total_calls: string;
+      last_mood: string | null;
+    }>(
+      `select
+        ow.id, ow.organization_id, o.name as organization_name,
+        ow.email, ow.phone_number, ow.name, ow.birth_date, ow.address, ow.notes,
+        ow.is_registered, ow.ward_id, ow.created_at,
+        (select max(c.created_at) from calls c
+         join wards w on c.callee_user_id = w.user_id
+         where w.id = ow.ward_id) as last_call_at,
+        (select count(*) from calls c
+         join wards w on c.callee_user_id = w.user_id
+         where w.id = ow.ward_id and c.state = 'ended')::text as total_calls,
+        (select cs.mood from call_summaries cs
+         where cs.ward_id = ow.ward_id
+         order by cs.created_at desc limit 1) as last_mood
+       from organization_wards ow
+       join organizations o on ow.organization_id = o.id
+       where ow.uploaded_by_admin_id = $1
+       order by ow.created_at desc`,
+      [adminId],
+    );
+    return result.rows;
+  }
+
+  async getMyManagedWardsStats(adminId: string) {
+    const result = await this.pool.query<{
+      total: string;
+      registered: string;
+      pending: string;
+      positive_mood: string;
+      negative_mood: string;
+    }>(
+      `select
+        count(*)::text as total,
+        count(*) filter (where is_registered = true)::text as registered,
+        count(*) filter (where is_registered = false)::text as pending,
+        (select count(*) from call_summaries cs
+         join organization_wards ow2 on cs.ward_id = ow2.ward_id
+         where ow2.uploaded_by_admin_id = $1 and cs.mood = 'positive')::text as positive_mood,
+        (select count(*) from call_summaries cs
+         join organization_wards ow2 on cs.ward_id = ow2.ward_id
+         where ow2.uploaded_by_admin_id = $1 and cs.mood = 'negative')::text as negative_mood
+       from organization_wards
+       where uploaded_by_admin_id = $1`,
+      [adminId],
+    );
+    return {
+      total: parseInt(result.rows[0]?.total || '0', 10),
+      registered: parseInt(result.rows[0]?.registered || '0', 10),
+      pending: parseInt(result.rows[0]?.pending || '0', 10),
+      positiveMood: parseInt(result.rows[0]?.positive_mood || '0', 10),
+      negativeMood: parseInt(result.rows[0]?.negative_mood || '0', 10),
+    };
   }
 
   // ============================================================
@@ -2170,6 +2295,13 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     role?: string;
     organizationId?: string;
   }) {
+    // 모든 관리자에게 admin 권한 부여 (첫 번째는 super_admin)
+    const countResult = await this.pool.query<{ count: string }>(
+      `select count(*) as count from admins`,
+    );
+    const isFirstAdmin = parseInt(countResult.rows[0].count, 10) === 0;
+    const role = isFirstAdmin ? 'super_admin' : (params.role || 'admin');
+
     const result = await this.pool.query<{ id: string }>(
       `insert into admins (email, name, provider, provider_id, role, organization_id)
        values ($1, $2, $3, $4, $5, $6)
@@ -2179,7 +2311,7 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
         params.name || null,
         params.provider,
         params.providerId,
-        params.role || 'viewer',
+        role,
         params.organizationId || null,
       ],
     );

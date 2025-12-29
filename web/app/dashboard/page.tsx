@@ -1,21 +1,30 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-} from "recharts";
+import SidebarLayout from "../../components/SidebarLayout";
+
+// 차트 컴포넌트들을 동적으로 import (SSR 비활성화)
+const WeeklyTrendChart = dynamic(
+  () => import("../../components/DashboardCharts").then((mod) => mod.WeeklyTrendChart),
+  { ssr: false, loading: () => <ChartLoading /> }
+);
+const MoodPieChart = dynamic(
+  () => import("../../components/DashboardCharts").then((mod) => mod.MoodPieChart),
+  { ssr: false, loading: () => <ChartLoading /> }
+);
+const KeywordsBarChart = dynamic(
+  () => import("../../components/DashboardCharts").then((mod) => mod.KeywordsBarChart),
+  { ssr: false, loading: () => <ChartLoading /> }
+);
+
+function ChartLoading() {
+  return (
+    <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b" }}>
+      차트 로딩 중...
+    </div>
+  );
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -29,22 +38,20 @@ type DashboardStats = {
     totalCallMinutes: number;
   };
   todayStats: {
-    callsToday: number;
-    avgDurationMinutes: number;
-    emergenciesToday: number;
+    calls: number;
+    avgDuration: number;
+    emergencies: number;
     newRegistrations: number;
   };
-  weeklyTrend: Array<{
-    date: string;
-    dayLabel: string;
-    calls: number;
-    emergencies: number;
-  }>;
+  weeklyTrend: {
+    calls: number[];
+    emergencies: number[];
+    labels: string[];
+  };
   moodDistribution: {
     positive: number;
     neutral: number;
     negative: number;
-    total: number;
   };
   healthAlerts: {
     warning: number;
@@ -98,12 +105,19 @@ export default function DashboardPage() {
 
   const fetchStats = useCallback(async () => {
     try {
+      console.log("[Dashboard] Fetching stats from:", `${API_BASE}/v1/admin/dashboard/stats`);
       const response = await fetch(`${API_BASE}/v1/admin/dashboard/stats`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("[Dashboard] Stats fetch failed:", response.status, errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
       const data = await response.json();
+      console.log("[Dashboard] Stats received:", data);
       setStats(data);
       setError(null);
     } catch (err) {
+      console.error("[Dashboard] Stats error:", err);
       setError((err as Error).message);
     } finally {
       setIsLoading(false);
@@ -141,66 +155,72 @@ export default function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div style={{ padding: "24px", textAlign: "center", color: "#6b7280" }}>
-        대시보드 로딩 중...
-      </div>
+      <SidebarLayout title="대시보드">
+        <div style={{ padding: "48px", textAlign: "center", color: "#64748b" }}>
+          대시보드 로딩 중...
+        </div>
+      </SidebarLayout>
     );
   }
 
   if (error) {
     return (
-      <div style={{ padding: "24px", textAlign: "center", color: "#ef4444" }}>
-        오류: {error}
-        <button
-          onClick={fetchStats}
-          style={{
-            marginLeft: "12px",
-            padding: "6px 12px",
-            backgroundColor: "#3b82f6",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-          }}
-        >
-          재시도
-        </button>
-      </div>
+      <SidebarLayout title="대시보드">
+        <div style={{ padding: "48px", textAlign: "center", color: "#dc2626" }}>
+          오류: {error}
+          <button
+            onClick={fetchStats}
+            style={{
+              marginLeft: "12px",
+              padding: "8px 16px",
+              backgroundColor: "#3b82f6",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontWeight: 500,
+            }}
+          >
+            재시도
+          </button>
+        </div>
+      </SidebarLayout>
     );
   }
 
   if (!stats) return null;
 
+  // API 응답을 차트 데이터로 변환
+  const moodTotal = stats.moodDistribution.positive + stats.moodDistribution.neutral + stats.moodDistribution.negative;
   const moodData = [
     { name: "긍정", value: stats.moodDistribution.positive, color: MOOD_COLORS.positive },
     { name: "중립", value: stats.moodDistribution.neutral, color: MOOD_COLORS.neutral },
     { name: "부정", value: stats.moodDistribution.negative, color: MOOD_COLORS.negative },
   ];
 
+  // weeklyTrend를 차트 데이터로 변환
+  const weeklyTrendData = stats.weeklyTrend.labels.map((label, index) => ({
+    dayLabel: label,
+    calls: stats.weeklyTrend.calls[index] || 0,
+    emergencies: stats.weeklyTrend.emergencies[index] || 0,
+  }));
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "#f3f4f6",
-        fontFamily: "sans-serif",
-      }}
-    >
-      {/* Header */}
-      <header
+    <SidebarLayout>
+      {/* Custom Header with Controls */}
+      <div
         style={{
-          backgroundColor: "white",
-          borderBottom: "1px solid #e5e7eb",
-          padding: "16px 24px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          marginBottom: "24px",
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: "20px", fontWeight: "bold" }}>
+          <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#1e293b" }}>
             관제 대시보드
           </h1>
-          <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#6b7280" }}>
+          <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>
             마지막 업데이트: {new Date(stats.fetchedAt).toLocaleString("ko-KR")}
           </p>
         </div>
@@ -210,8 +230,9 @@ export default function DashboardPage() {
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
+              style={{ width: "16px", height: "16px", accentColor: "#3b82f6" }}
             />
-            <span style={{ fontSize: "14px" }}>자동 새로고침</span>
+            <span style={{ fontSize: "14px", color: "#475569", fontWeight: 500 }}>자동 새로고침</span>
           </label>
           <button
             onClick={() => {
@@ -219,353 +240,306 @@ export default function DashboardPage() {
               fetchRealtime();
             }}
             style={{
-              padding: "8px 16px",
+              padding: "10px 20px",
               backgroundColor: "#3b82f6",
               color: "white",
               border: "none",
-              borderRadius: "6px",
+              borderRadius: "8px",
               cursor: "pointer",
               fontSize: "14px",
+              fontWeight: 600,
+              transition: "background 150ms ease",
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#2563eb")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#3b82f6")}
           >
             새로고침
           </button>
         </div>
-      </header>
+      </div>
 
-      <main style={{ padding: "24px", maxWidth: "1600px", margin: "0 auto" }}>
-        {/* Realtime Stats Banner */}
-        {realtime && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: "16px",
-              marginBottom: "24px",
-            }}
-          >
-            <RealtimeCard
-              label="진행 중인 통화"
-              value={realtime.activeCalls}
-              color="#3b82f6"
-              icon="📞"
-            />
-            <RealtimeCard
-              label="온라인 피보호자"
-              value={realtime.onlineWards}
-              color="#22c55e"
-              icon="🟢"
-            />
-            <RealtimeCard
-              label="대기 중인 비상상황"
-              value={realtime.pendingEmergencies}
-              color={realtime.pendingEmergencies > 0 ? "#ef4444" : "#6b7280"}
-              icon="🚨"
-              highlight={realtime.pendingEmergencies > 0}
-            />
-          </div>
-        )}
-
-        {/* Overview Cards */}
+      {/* Realtime Stats Banner */}
+      {realtime && (
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(6, 1fr)",
+            gridTemplateColumns: "repeat(3, 1fr)",
             gap: "16px",
             marginBottom: "24px",
           }}
         >
-          <StatCard label="전체 피보호자" value={stats.overview.totalWards} />
-          <StatCard
-            label="활성 피보호자"
-            value={stats.overview.activeWards}
-            subtext={`${Math.round((stats.overview.activeWards / Math.max(stats.overview.totalWards, 1)) * 100)}%`}
-          />
-          <StatCard label="전체 보호자" value={stats.overview.totalGuardians} />
-          <StatCard label="등록 기관" value={stats.overview.totalOrganizations} />
-          <StatCard
-            label="총 통화 수"
-            value={stats.overview.totalCalls.toLocaleString()}
-          />
-          <StatCard
-            label="총 통화 시간"
-            value={`${Math.round(stats.overview.totalCallMinutes / 60)}시간`}
-            subtext={`${stats.overview.totalCallMinutes.toLocaleString()}분`}
-          />
-        </div>
-
-        {/* Today Stats */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: "16px",
-            marginBottom: "24px",
-          }}
-        >
-          <TodayCard
-            label="오늘 통화"
-            value={stats.todayStats.callsToday}
+          <RealtimeCard
+            label="진행 중인 통화"
+            value={realtime.activeCalls}
+            color="#3b82f6"
             icon="📞"
           />
-          <TodayCard
-            label="평균 통화시간"
-            value={`${stats.todayStats.avgDurationMinutes.toFixed(1)}분`}
-            icon="⏱️"
+          <RealtimeCard
+            label="온라인 피보호자"
+            value={realtime.onlineWards}
+            color="#22c55e"
+            icon="🟢"
           />
-          <TodayCard
-            label="오늘 비상상황"
-            value={stats.todayStats.emergenciesToday}
+          <RealtimeCard
+            label="대기 중인 비상상황"
+            value={realtime.pendingEmergencies}
+            color={realtime.pendingEmergencies > 0 ? "#dc2626" : "#64748b"}
             icon="🚨"
-            highlight={stats.todayStats.emergenciesToday > 0}
-          />
-          <TodayCard
-            label="신규 등록"
-            value={stats.todayStats.newRegistrations}
-            icon="👤"
+            highlight={realtime.pendingEmergencies > 0}
           />
         </div>
+      )}
 
-        {/* Charts Row 1 */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "2fr 1fr",
-            gap: "24px",
-            marginBottom: "24px",
-          }}
-        >
-          {/* Weekly Trend Chart */}
-          <div
-            style={{
-              backgroundColor: "white",
-              borderRadius: "12px",
-              padding: "20px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: "bold" }}>
-              주간 추이
-            </h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={stats.weeklyTrend}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="dayLabel" fontSize={12} />
-                <YAxis fontSize={12} />
-                <Tooltip />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="calls"
-                  name="통화"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={{ fill: "#3b82f6" }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="emergencies"
-                  name="비상상황"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  dot={{ fill: "#ef4444" }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+      {/* Overview Cards */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, 1fr)",
+          gap: "16px",
+          marginBottom: "24px",
+        }}
+      >
+        <StatCard label="전체 피보호자" value={stats.overview.totalWards} />
+        <StatCard
+          label="활성 피보호자"
+          value={stats.overview.activeWards}
+          subtext={`${Math.round((stats.overview.activeWards / Math.max(stats.overview.totalWards, 1)) * 100)}%`}
+        />
+        <StatCard label="전체 보호자" value={stats.overview.totalGuardians} />
+        <StatCard label="등록 기관" value={stats.overview.totalOrganizations} />
+        <StatCard
+          label="총 통화 수"
+          value={stats.overview.totalCalls.toLocaleString()}
+        />
+        <StatCard
+          label="총 통화 시간"
+          value={`${Math.round(stats.overview.totalCallMinutes / 60)}시간`}
+          subtext={`${stats.overview.totalCallMinutes.toLocaleString()}분`}
+        />
+      </div>
 
-          {/* Mood Distribution */}
-          <div
-            style={{
-              backgroundColor: "white",
-              borderRadius: "12px",
-              padding: "20px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: "bold" }}>
-              감정 분포 (총 {stats.moodDistribution.total}건)
-            </h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie
-                  data={moodData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}%`}
-                  labelLine={false}
-                >
-                  {moodData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+      {/* Today Stats */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: "16px",
+          marginBottom: "24px",
+        }}
+      >
+        <TodayCard
+          label="오늘 통화"
+          value={stats.todayStats.calls}
+          icon="📞"
+        />
+        <TodayCard
+          label="평균 통화시간"
+          value={`${stats.todayStats.avgDuration.toFixed(1)}분`}
+          icon="⏱️"
+        />
+        <TodayCard
+          label="오늘 비상상황"
+          value={stats.todayStats.emergencies}
+          icon="🚨"
+          highlight={stats.todayStats.emergencies > 0}
+        />
+        <TodayCard
+          label="신규 등록"
+          value={stats.todayStats.newRegistrations}
+          icon="👤"
+        />
+      </div>
 
-        {/* Charts Row 2 */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: "24px",
-            marginBottom: "24px",
-          }}
-        >
-          {/* Health Alerts */}
-          <div
-            style={{
-              backgroundColor: "white",
-              borderRadius: "12px",
-              padding: "20px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: "bold" }}>
-              건강 알림
-            </h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <AlertRow
-                label="경고 알림"
-                value={stats.healthAlerts.warning}
-                color="#f59e0b"
-              />
-              <AlertRow
-                label="정보 알림"
-                value={stats.healthAlerts.info}
-                color="#3b82f6"
-              />
-              <AlertRow
-                label="미확인 알림"
-                value={stats.healthAlerts.unread}
-                color="#ef4444"
-                highlight
-              />
-            </div>
-          </div>
-
-          {/* Top Keywords */}
-          <div
-            style={{
-              backgroundColor: "white",
-              borderRadius: "12px",
-              padding: "20px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: "bold" }}>
-              주요 건강 키워드
-            </h3>
-            {stats.topKeywords.length > 0 ? (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart
-                  data={stats.topKeywords.slice(0, 5)}
-                  layout="vertical"
-                  margin={{ left: 40 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" fontSize={12} />
-                  <YAxis type="category" dataKey="keyword" fontSize={12} width={60} />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div
-                style={{
-                  height: "200px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#6b7280",
-                }}
-              >
-                키워드 데이터 없음
-              </div>
-            )}
-          </div>
-
-          {/* Organization Stats */}
-          <div
-            style={{
-              backgroundColor: "white",
-              borderRadius: "12px",
-              padding: "20px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: "bold" }}>
-              기관별 현황
-            </h3>
-            {stats.organizationStats.length > 0 ? (
-              <div style={{ maxHeight: "200px", overflow: "auto" }}>
-                <table style={{ width: "100%", fontSize: "13px", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <th style={{ textAlign: "left", padding: "8px 4px", color: "#6b7280" }}>기관</th>
-                      <th style={{ textAlign: "right", padding: "8px 4px", color: "#6b7280" }}>피보호자</th>
-                      <th style={{ textAlign: "right", padding: "8px 4px", color: "#6b7280" }}>통화</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.organizationStats.map((org) => (
-                      <tr key={org.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                        <td style={{ padding: "8px 4px" }}>{org.name}</td>
-                        <td style={{ textAlign: "right", padding: "8px 4px" }}>{org.wardCount}</td>
-                        <td style={{ textAlign: "right", padding: "8px 4px" }}>{org.callCount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div
-                style={{
-                  height: "200px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#6b7280",
-                }}
-              >
-                등록된 기관 없음
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Recent Activity */}
+      {/* Charts Row 1 */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr",
+          gap: "24px",
+          marginBottom: "24px",
+        }}
+      >
+        {/* Weekly Trend Chart */}
         <div
           style={{
             backgroundColor: "white",
             borderRadius: "12px",
             padding: "20px",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+            border: "1px solid #e2e8f0",
           }}
         >
-          <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: "bold" }}>
-            최근 활동
+          <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+            주간 추이
           </h3>
-          {stats.recentActivity.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {stats.recentActivity.slice(0, 10).map((activity, index) => (
-                <ActivityItem key={index} activity={activity} />
-              ))}
-            </div>
+          <WeeklyTrendChart data={weeklyTrendData} />
+        </div>
+
+        {/* Mood Distribution */}
+        <div
+          style={{
+            backgroundColor: "white",
+            borderRadius: "12px",
+            padding: "20px",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+            감정 분포 (총 {moodTotal}건)
+          </h3>
+          <MoodPieChart data={moodData} />
+        </div>
+      </div>
+
+      {/* Charts Row 2 */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: "24px",
+          marginBottom: "24px",
+        }}
+      >
+        {/* Health Alerts */}
+        <div
+          style={{
+            backgroundColor: "white",
+            borderRadius: "12px",
+            padding: "20px",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+            건강 알림
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <AlertRow
+              label="경고 알림"
+              value={stats.healthAlerts.warning}
+              color="#f59e0b"
+            />
+            <AlertRow
+              label="정보 알림"
+              value={stats.healthAlerts.info}
+              color="#3b82f6"
+            />
+            <AlertRow
+              label="미확인 알림"
+              value={stats.healthAlerts.unread}
+              color="#dc2626"
+              highlight
+            />
+          </div>
+        </div>
+
+        {/* Top Keywords */}
+        <div
+          style={{
+            backgroundColor: "white",
+            borderRadius: "12px",
+            padding: "20px",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+            주요 건강 키워드
+          </h3>
+          {stats.topKeywords.length > 0 ? (
+            <KeywordsBarChart data={stats.topKeywords.slice(0, 5)} />
           ) : (
-            <div style={{ padding: "24px", textAlign: "center", color: "#6b7280" }}>
-              최근 활동 없음
+            <div
+              style={{
+                height: "200px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#64748b",
+              }}
+            >
+              키워드 데이터 없음
             </div>
           )}
         </div>
-      </main>
-    </div>
+
+        {/* Organization Stats */}
+        <div
+          style={{
+            backgroundColor: "white",
+            borderRadius: "12px",
+            padding: "20px",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+            기관별 현황
+          </h3>
+          {stats.organizationStats.length > 0 ? (
+            <div style={{ maxHeight: "200px", overflow: "auto" }}>
+              <table style={{ width: "100%", fontSize: "13px", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                    <th style={{ textAlign: "left", padding: "10px 4px", color: "#475569", fontWeight: 600 }}>기관</th>
+                    <th style={{ textAlign: "right", padding: "10px 4px", color: "#475569", fontWeight: 600 }}>피보호자</th>
+                    <th style={{ textAlign: "right", padding: "10px 4px", color: "#475569", fontWeight: 600 }}>통화</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.organizationStats.map((org) => (
+                    <tr key={org.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "10px 4px", color: "#1e293b" }}>{org.name}</td>
+                      <td style={{ textAlign: "right", padding: "10px 4px", color: "#475569" }}>{org.wardCount}</td>
+                      <td style={{ textAlign: "right", padding: "10px 4px", color: "#475569" }}>{org.callCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div
+              style={{
+                height: "200px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#64748b",
+              }}
+            >
+              등록된 기관 없음
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Recent Activity */}
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: "12px",
+          padding: "20px",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+          border: "1px solid #e2e8f0",
+        }}
+      >
+        <h3 style={{ margin: "0 0 16px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+          최근 활동
+        </h3>
+        {stats.recentActivity.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {stats.recentActivity.slice(0, 10).map((activity, index) => (
+              <ActivityItem key={index} activity={activity} />
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>
+            최근 활동 없음
+          </div>
+        )}
+      </div>
+    </SidebarLayout>
   );
 }
 
@@ -587,19 +561,19 @@ function RealtimeCard({
       style={{
         backgroundColor: highlight ? "#fef2f2" : "white",
         borderRadius: "12px",
-        padding: "16px 20px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+        padding: "18px 22px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
         display: "flex",
         alignItems: "center",
         gap: "16px",
-        border: highlight ? "2px solid #ef4444" : "1px solid #e5e7eb",
+        border: highlight ? "2px solid #fca5a5" : "1px solid #e2e8f0",
         animation: highlight ? "pulse 2s infinite" : "none",
       }}
     >
       <span style={{ fontSize: "28px" }}>{icon}</span>
       <div>
-        <div style={{ fontSize: "24px", fontWeight: "bold", color }}>{value}</div>
-        <div style={{ fontSize: "13px", color: "#6b7280" }}>{label}</div>
+        <div style={{ fontSize: "26px", fontWeight: 700, color }}>{value}</div>
+        <div style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>{label}</div>
       </div>
     </div>
   );
@@ -619,19 +593,20 @@ function StatCard({
       style={{
         backgroundColor: "white",
         borderRadius: "12px",
-        padding: "16px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+        padding: "18px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
         textAlign: "center",
+        border: "1px solid #e2e8f0",
       }}
     >
-      <div style={{ fontSize: "24px", fontWeight: "bold", color: "#1f2937" }}>
+      <div style={{ fontSize: "26px", fontWeight: 700, color: "#1e293b" }}>
         {value}
       </div>
-      <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>
+      <div style={{ fontSize: "13px", color: "#64748b", marginTop: "6px", fontWeight: 500 }}>
         {label}
       </div>
       {subtext && (
-        <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>
+        <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px" }}>
           {subtext}
         </div>
       )}
@@ -655,26 +630,26 @@ function TodayCard({
       style={{
         backgroundColor: highlight ? "#fef2f2" : "white",
         borderRadius: "12px",
-        padding: "16px 20px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+        padding: "18px 22px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
         display: "flex",
         alignItems: "center",
-        gap: "12px",
-        border: highlight ? "1px solid #fca5a5" : "none",
+        gap: "14px",
+        border: highlight ? "1px solid #fca5a5" : "1px solid #e2e8f0",
       }}
     >
-      <span style={{ fontSize: "24px" }}>{icon}</span>
+      <span style={{ fontSize: "26px" }}>{icon}</span>
       <div>
         <div
           style={{
-            fontSize: "20px",
-            fontWeight: "bold",
-            color: highlight ? "#dc2626" : "#1f2937",
+            fontSize: "22px",
+            fontWeight: 700,
+            color: highlight ? "#dc2626" : "#1e293b",
           }}
         >
           {value}
         </div>
-        <div style={{ fontSize: "13px", color: "#6b7280" }}>{label}</div>
+        <div style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>{label}</div>
       </div>
     </div>
   );
@@ -697,17 +672,17 @@ function AlertRow({
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        padding: "12px 16px",
-        backgroundColor: highlight ? "#fef2f2" : "#f9fafb",
-        borderRadius: "8px",
-        border: highlight ? "1px solid #fca5a5" : "none",
+        padding: "14px 18px",
+        backgroundColor: highlight ? "#fef2f2" : "#f8fafc",
+        borderRadius: "10px",
+        border: highlight ? "1px solid #fca5a5" : "1px solid #e2e8f0",
       }}
     >
-      <span style={{ fontSize: "14px", color: "#374151" }}>{label}</span>
+      <span style={{ fontSize: "14px", color: "#475569", fontWeight: 500 }}>{label}</span>
       <span
         style={{
-          fontSize: "18px",
-          fontWeight: "bold",
+          fontSize: "20px",
+          fontWeight: 700,
           color,
         }}
       >
@@ -735,8 +710,8 @@ function ActivityItem({
 
   const typeColors: Record<string, string> = {
     call_started: "#3b82f6",
-    call_ended: "#6b7280",
-    emergency: "#ef4444",
+    call_ended: "#64748b",
+    emergency: "#dc2626",
   };
 
   const timeAgo = getTimeAgo(new Date(activity.timestamp));
@@ -746,24 +721,26 @@ function ActivityItem({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: "12px",
-        padding: "10px 12px",
-        backgroundColor: activity.type === "emergency" ? "#fef2f2" : "#f9fafb",
-        borderRadius: "8px",
+        gap: "14px",
+        padding: "12px 16px",
+        backgroundColor: activity.type === "emergency" ? "#fef2f2" : "#f8fafc",
+        borderRadius: "10px",
+        border: activity.type === "emergency" ? "1px solid #fca5a5" : "1px solid #e2e8f0",
       }}
     >
-      <span style={{ fontSize: "20px" }}>{typeIcons[activity.type] || "📌"}</span>
+      <span style={{ fontSize: "22px" }}>{typeIcons[activity.type] || "📌"}</span>
       <div style={{ flex: 1 }}>
         <div
           style={{
             fontSize: "14px",
-            color: typeColors[activity.type] || "#374151",
+            fontWeight: 500,
+            color: typeColors[activity.type] || "#475569",
           }}
         >
           {activity.description}
         </div>
       </div>
-      <div style={{ fontSize: "12px", color: "#9ca3af" }}>{timeAgo}</div>
+      <div style={{ fontSize: "12px", color: "#94a3b8", fontWeight: 500 }}>{timeAgo}</div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import SidebarLayout from "../../components/SidebarLayout";
 import { LocationMap, type WardLocation } from "../../components/LocationMap";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -59,159 +60,153 @@ export default function LocationsPage() {
   );
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif" }}>
-      {/* Sidebar */}
-      <aside
-        style={{
-          width: "320px",
-          backgroundColor: "#f9fafb",
-          borderRight: "1px solid #e5e7eb",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Header */}
-        <div
+    <SidebarLayout>
+      <div style={{ display: "flex", gap: "24px", height: "calc(100vh - 80px)" }}>
+        {/* Ward List Panel */}
+        <aside
           style={{
-            padding: "16px",
-            borderBottom: "1px solid #e5e7eb",
+            width: "340px",
             backgroundColor: "white",
-          }}
-        >
-          <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-            실시간 위치 현황
-          </h1>
-          <p style={{ margin: "8px 0 0", fontSize: "14px", color: "#6b7280" }}>
-            등록된 피보호자: {locations.length}명
-          </p>
-        </div>
-
-        {/* Status Summary */}
-        <div
-          style={{
+            borderRadius: "12px",
+            border: "1px solid #e2e8f0",
             display: "flex",
-            gap: "8px",
-            padding: "12px 16px",
-            borderBottom: "1px solid #e5e7eb",
+            flexDirection: "column",
+            flexShrink: 0,
+            overflow: "hidden",
           }}
         >
-          <StatusBadge
-            label="정상"
-            count={statusCounts.normal}
-            color="#22c55e"
-          />
-          <StatusBadge
-            label="주의"
-            count={statusCounts.warning}
-            color="#f59e0b"
-          />
-          <StatusBadge
-            label="비상"
-            count={statusCounts.emergency}
-            color="#ef4444"
-          />
-        </div>
-
-        {/* Controls */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 16px",
-            borderBottom: "1px solid #e5e7eb",
-          }}
-        >
-          <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <span style={{ fontSize: "14px" }}>자동 새로고침 (30초)</span>
-          </label>
-          <button
-            onClick={fetchLocations}
-            style={{
-              padding: "6px 12px",
-              fontSize: "13px",
-              backgroundColor: "#3b82f6",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-            }}
-          >
-            새로고침
-          </button>
-        </div>
-
-        {/* Ward List */}
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {isLoading ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#6b7280" }}>
-              로딩 중...
-            </div>
-          ) : error ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#ef4444" }}>
-              오류: {error}
-            </div>
-          ) : locations.length === 0 ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#6b7280" }}>
-              등록된 위치 정보가 없습니다.
-            </div>
-          ) : (
-            locations.map((loc) => (
-              <WardListItem
-                key={loc.wardId}
-                location={loc}
-                isSelected={loc.wardId === selectedWardId}
-                onClick={() => handleWardClick(loc.wardId)}
-              />
-            ))
-          )}
-        </div>
-
-        {/* Selected Ward Detail */}
-        {selectedLocation && (
+          {/* Header */}
           <div
             style={{
-              padding: "16px",
-              borderTop: "1px solid #e5e7eb",
-              backgroundColor: "white",
+              padding: "20px",
+              borderBottom: "1px solid #e2e8f0",
             }}
           >
-            <h3 style={{ margin: "0 0 12px", fontSize: "16px" }}>
-              {selectedLocation.wardName}
-            </h3>
-            <div style={{ fontSize: "13px", color: "#6b7280", lineHeight: "1.8" }}>
-              <div>
-                <strong>위치:</strong> {selectedLocation.latitude.toFixed(6)},{" "}
-                {selectedLocation.longitude.toFixed(6)}
+            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#1e293b" }}>
+              실시간 위치 현황
+            </h2>
+            <p style={{ margin: "6px 0 0", fontSize: "14px", color: "#64748b" }}>
+              등록된 피보호자: {locations.length}명
+            </p>
+          </div>
+
+          {/* Status Summary */}
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              padding: "14px 20px",
+              borderBottom: "1px solid #e2e8f0",
+            }}
+          >
+            <StatusBadge label="정상" count={statusCounts.normal} color="#22c55e" />
+            <StatusBadge label="주의" count={statusCounts.warning} color="#f59e0b" />
+            <StatusBadge label="비상" count={statusCounts.emergency} color="#ef4444" />
+          </div>
+
+          {/* Controls */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "14px 20px",
+              borderBottom: "1px solid #e2e8f0",
+            }}
+          >
+            <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                style={{ width: "16px", height: "16px", accentColor: "#3b82f6" }}
+              />
+              <span style={{ fontSize: "14px", color: "#475569", fontWeight: 500 }}>자동 새로고침</span>
+            </label>
+            <button
+              onClick={fetchLocations}
+              style={{
+                padding: "8px 14px",
+                fontSize: "13px",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              새로고침
+            </button>
+          </div>
+
+          {/* Ward List */}
+          <div style={{ flex: 1, overflow: "auto" }}>
+            {isLoading ? (
+              <div style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
+                로딩 중...
               </div>
-              {selectedLocation.accuracy && (
+            ) : error ? (
+              <div style={{ padding: "32px", textAlign: "center", color: "#dc2626" }}>
+                오류: {error}
+              </div>
+            ) : locations.length === 0 ? (
+              <div style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
+                등록된 위치 정보가 없습니다.
+              </div>
+            ) : (
+              locations.map((loc) => (
+                <WardListItem
+                  key={loc.wardId}
+                  location={loc}
+                  isSelected={loc.wardId === selectedWardId}
+                  onClick={() => handleWardClick(loc.wardId)}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Selected Ward Detail */}
+          {selectedLocation && (
+            <div
+              style={{
+                padding: "20px",
+                borderTop: "1px solid #e2e8f0",
+                backgroundColor: "#f8fafc",
+              }}
+            >
+              <h3 style={{ margin: "0 0 14px", fontSize: "16px", fontWeight: 600, color: "#1e293b" }}>
+                {selectedLocation.wardName}
+              </h3>
+              <div style={{ fontSize: "13px", color: "#475569", lineHeight: "1.9" }}>
                 <div>
-                  <strong>정확도:</strong> {selectedLocation.accuracy.toFixed(1)}m
+                  <strong style={{ color: "#1e293b" }}>위치:</strong> {selectedLocation.latitude.toFixed(6)},{" "}
+                  {selectedLocation.longitude.toFixed(6)}
                 </div>
-              )}
-              <div>
-                <strong>마지막 업데이트:</strong>{" "}
-                {new Date(selectedLocation.lastUpdated).toLocaleString("ko-KR")}
+                {selectedLocation.accuracy && (
+                  <div>
+                    <strong style={{ color: "#1e293b" }}>정확도:</strong> {selectedLocation.accuracy.toFixed(1)}m
+                  </div>
+                )}
+                <div>
+                  <strong style={{ color: "#1e293b" }}>마지막 업데이트:</strong>{" "}
+                  {new Date(selectedLocation.lastUpdated).toLocaleString("ko-KR")}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </aside>
+          )}
+        </aside>
 
-      {/* Map */}
-      <main style={{ flex: 1, position: "relative" }}>
-        <LocationMap
-          locations={locations}
-          onWardClick={handleWardClick}
-          selectedWardId={selectedWardId || undefined}
-        />
-      </main>
-    </div>
+        {/* Map */}
+        <main style={{ flex: 1, borderRadius: "12px", overflow: "hidden", border: "1px solid #e2e8f0" }}>
+          <LocationMap
+            locations={locations}
+            onWardClick={handleWardClick}
+            selectedWardId={selectedWardId || undefined}
+          />
+        </main>
+      </div>
+    </SidebarLayout>
   );
 }
 
@@ -229,10 +224,11 @@ function StatusBadge({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: "4px",
-        padding: "4px 10px",
-        backgroundColor: color + "20",
-        borderRadius: "16px",
+        gap: "6px",
+        padding: "6px 12px",
+        backgroundColor: color + "15",
+        borderRadius: "20px",
+        border: `1px solid ${color}30`,
       }}
     >
       <div
@@ -243,7 +239,7 @@ function StatusBadge({
           backgroundColor: color,
         }}
       />
-      <span style={{ fontSize: "13px", color: "#374151" }}>
+      <span style={{ fontSize: "13px", color: "#1e293b", fontWeight: 500 }}>
         {label}: {count}
       </span>
     </div>
@@ -274,26 +270,29 @@ function WardListItem({
         width: "100%",
         display: "flex",
         alignItems: "center",
-        gap: "12px",
-        padding: "12px 16px",
+        gap: "14px",
+        padding: "14px 20px",
         border: "none",
-        borderBottom: "1px solid #e5e7eb",
+        borderBottom: "1px solid #f1f5f9",
         backgroundColor: isSelected ? "#eff6ff" : "transparent",
         cursor: "pointer",
         textAlign: "left",
+        transition: "background 150ms ease",
       }}
+      onMouseEnter={(e) => !isSelected && (e.currentTarget.style.backgroundColor = "#f8fafc")}
+      onMouseLeave={(e) => !isSelected && (e.currentTarget.style.backgroundColor = "transparent")}
     >
       <div
         style={{
-          width: "40px",
-          height: "40px",
+          width: "42px",
+          height: "42px",
           borderRadius: "50%",
           backgroundColor: statusColors[location.status],
           color: "white",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontWeight: "bold",
+          fontWeight: 700,
           fontSize: "14px",
           flexShrink: 0,
         }}
@@ -303,19 +302,20 @@ function WardListItem({
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
-            fontWeight: isSelected ? "bold" : "normal",
+            fontWeight: isSelected ? 600 : 500,
             fontSize: "14px",
-            marginBottom: "2px",
+            color: "#1e293b",
+            marginBottom: "4px",
           }}
         >
           {location.wardName}
         </div>
-        <div style={{ fontSize: "12px", color: "#6b7280" }}>{timeAgo}</div>
+        <div style={{ fontSize: "12px", color: "#64748b" }}>{timeAgo}</div>
       </div>
       <div
         style={{
-          width: "8px",
-          height: "8px",
+          width: "10px",
+          height: "10px",
           borderRadius: "50%",
           backgroundColor: statusColors[location.status],
           flexShrink: 0,
