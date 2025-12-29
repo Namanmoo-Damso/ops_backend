@@ -972,4 +972,71 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       [guardianId],
     );
   }
+
+  // ============================================================
+  // Ward Settings methods
+  // ============================================================
+
+  async updateWardSettings(params: {
+    wardId: string;
+    aiPersona?: string;
+    weeklyCallCount?: number;
+    callDurationMinutes?: number;
+  }) {
+    const updates: string[] = [];
+    const values: (string | number)[] = [];
+    let paramIndex = 1;
+
+    if (params.aiPersona !== undefined) {
+      updates.push(`ai_persona = $${paramIndex++}`);
+      values.push(params.aiPersona);
+    }
+    if (params.weeklyCallCount !== undefined) {
+      updates.push(`weekly_call_count = $${paramIndex++}`);
+      values.push(params.weeklyCallCount);
+    }
+    if (params.callDurationMinutes !== undefined) {
+      updates.push(`call_duration_minutes = $${paramIndex++}`);
+      values.push(params.callDurationMinutes);
+    }
+
+    if (updates.length === 0) {
+      return this.findWardByUserId(params.wardId);
+    }
+
+    updates.push('updated_at = now()');
+    values.push(params.wardId);
+
+    const result = await this.pool.query<WardRow>(
+      `update wards
+       set ${updates.join(', ')}
+       where user_id = $${paramIndex}
+       returning id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at`,
+      values,
+    );
+    return result.rows[0];
+  }
+
+  async getNotificationSettings(userId: string) {
+    const result = await this.pool.query<{
+      call_reminder: boolean;
+      call_complete: boolean;
+      health_alert: boolean;
+    }>(
+      `select call_reminder, call_complete, health_alert
+       from notification_settings
+       where user_id = $1
+       limit 1`,
+      [userId],
+    );
+    if (result.rows[0]) {
+      return result.rows[0];
+    }
+    // 기본값 반환
+    return {
+      call_reminder: true,
+      call_complete: true,
+      health_alert: true,
+    };
+  }
 }
