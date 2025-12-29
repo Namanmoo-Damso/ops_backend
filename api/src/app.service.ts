@@ -170,6 +170,7 @@ export class AppService {
       voipToken?: string;
       platform?: string;
       env?: string;
+      supportsCallKit?: boolean;
     };
   }): Promise<RtcTokenResult> {
     const config = getConfig();
@@ -219,6 +220,7 @@ export class AppService {
         env: params.device.env,
         apnsToken: params.device.apnsToken,
         voipToken: params.device.voipToken,
+        supportsCallKit: params.device.supportsCallKit,
       });
     }
 
@@ -355,29 +357,38 @@ export class AppService {
       roomName,
       30,
     );
+
+    // If there's an existing ringing call, reuse callId but still resend push
+    const isDeduped = !!existing;
+    let callId: string;
+    let callState: string;
+
     if (existing) {
+      callId = existing.call_id;
+      callState = 'ringing';
       this.logger.log(
-        `inviteCall deduped caller=${params.callerIdentity} callee=${params.calleeIdentity} room=${roomName} callId=${existing.call_id}`,
+        `inviteCall deduped caller=${params.callerIdentity} callee=${params.calleeIdentity} room=${roomName} callId=${callId} (resending push)`,
       );
-      return { callId: existing.call_id, roomName, state: 'ringing', deduped: true };
+    } else {
+      const callerUser = await this.dbService.upsertUser(
+        params.callerIdentity,
+        params.callerName,
+      );
+      const calleeUser = await this.dbService.upsertUser(params.calleeIdentity);
+
+      const call = await this.dbService.createCall({
+        callerIdentity: params.callerIdentity,
+        calleeIdentity: params.calleeIdentity,
+        callerUserId: callerUser.id,
+        calleeUserId: calleeUser.id,
+        roomName,
+      });
+      callId = call.call_id;
+      callState = call.state;
     }
 
-    const callerUser = await this.dbService.upsertUser(
-      params.callerIdentity,
-      params.callerName,
-    );
-    const calleeUser = await this.dbService.upsertUser(params.calleeIdentity);
-
-    const call = await this.dbService.createCall({
-      callerIdentity: params.callerIdentity,
-      calleeIdentity: params.calleeIdentity,
-      callerUserId: callerUser.id,
-      calleeUserId: calleeUser.id,
-      roomName,
-    });
-
     const payload = {
-      callId: call.call_id,
+      callId,
       roomName,
       callerName: params.callerName ?? params.callerIdentity,
       callerIdentity: params.callerIdentity,
@@ -453,12 +464,13 @@ export class AppService {
     };
 
     this.logger.log(
-      `inviteCall sent caller=${params.callerIdentity} callee=${params.calleeIdentity} room=${roomName} callId=${call.call_id} voipSent=${voipSent} voipFailed=${voipFailed} alertSent=${alertSent} alertFailed=${alertFailed}`,
+      `inviteCall sent caller=${params.callerIdentity} callee=${params.calleeIdentity} room=${roomName} callId=${callId} deduped=${isDeduped} voipSent=${voipSent} voipFailed=${voipFailed} alertSent=${alertSent} alertFailed=${alertFailed}`,
     );
     return {
-      callId: call.call_id,
+      callId,
       roomName,
-      state: call.state,
+      state: callState,
+      deduped: isDeduped,
       push,
     };
   }
