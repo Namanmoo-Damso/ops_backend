@@ -146,6 +146,7 @@ export class AppController {
       env?: 'prod' | 'sandbox';
       apnsToken?: string;
       voipToken?: string;
+      supportsCallKit?: boolean;
     },
   ) {
     const config = this.appService.getConfig();
@@ -162,6 +163,7 @@ export class AppController {
     const displayName = body.displayName?.trim() || auth?.displayName;
     const platform = body.platform?.trim() || 'ios';
     const env = body.env;
+    const supportsCallKit = body.supportsCallKit ?? true;
 
     if (env && !['prod', 'sandbox'].includes(env)) {
       throw new HttpException('invalid env', HttpStatus.BAD_REQUEST);
@@ -169,7 +171,7 @@ export class AppController {
 
     try {
       this.logger.log(
-        `registerDevice identity=${identity} platform=${platform} env=${env ?? 'default'} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
+        `registerDevice identity=${identity} platform=${platform} env=${env ?? 'default'} supportsCallKit=${supportsCallKit} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
       );
       return await this.appService.registerDevice({
         identity,
@@ -178,6 +180,7 @@ export class AppController {
         env,
         apnsToken: body.apnsToken,
         voipToken: body.voipToken,
+        supportsCallKit,
       });
     } catch (error) {
       this.logger.warn(

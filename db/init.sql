@@ -13,6 +13,7 @@ create table if not exists devices (
   platform text not null,
   apns_token text,
   voip_token text,
+  supports_callkit boolean not null default true,
   env text not null default 'prod',
   last_seen timestamptz not null default now(),
   created_at timestamptz not null default now(),
