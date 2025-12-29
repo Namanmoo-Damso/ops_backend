@@ -61,6 +61,18 @@ type KakaoLoginResult =
       };
     };
 
+type GuardianRegistrationResult = {
+  accessToken: string;
+  refreshToken: string;
+  user: UserInfo;
+  guardianInfo: {
+    id: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+    linkedWard: null;
+  };
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -306,6 +318,65 @@ export class AuthService {
     // 5. 새 토큰 발급
     this.logger.log(`refreshTokens userId=${user.id}`);
     return this.issueTokens(user.id, user.user_type as UserType | null);
+  }
+
+  async registerGuardian(params: {
+    tempToken: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }): Promise<GuardianRegistrationResult> {
+    // 1. 임시 토큰 검증
+    const tempPayload = this.verifyTempToken(params.tempToken);
+    if (!tempPayload) {
+      throw new UnauthorizedException('Invalid or expired temp token');
+    }
+
+    // 2. 카카오 ID로 기존 사용자 확인 (중복 방지)
+    const existingUser = await this.dbService.findUserByKakaoId(tempPayload.kakaoId);
+    if (existingUser) {
+      throw new UnauthorizedException('User already registered');
+    }
+
+    // 3. 카카오 프로필 다시 가져오기 (temp token에서는 kakaoId만 있음)
+    // 임시 토큰 발급 시점의 프로필 정보가 필요하므로 별도 저장 필요
+    // 현재는 간단히 kakaoId만 사용하여 처리
+
+    // 4. 사용자 생성
+    const user = await this.dbService.createUserWithKakao({
+      kakaoId: tempPayload.kakaoId,
+      email: null, // 카카오 프로필에서 가져와야 하지만 temp token에는 없음
+      nickname: null,
+      profileImageUrl: null,
+      userType: 'guardian',
+    });
+
+    // 5. 보호자 정보 생성
+    const guardian = await this.dbService.createGuardian({
+      userId: user.id,
+      wardEmail: params.wardEmail,
+      wardPhoneNumber: params.wardPhoneNumber,
+    });
+
+    // 6. JWT 발급
+    const tokens = await this.issueTokens(user.id, 'guardian');
+
+    this.logger.log(`registerGuardian userId=${user.id} guardianId=${guardian.id}`);
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        nickname: user.nickname,
+        profileImageUrl: user.profile_image_url,
+        userType: 'guardian',
+      },
+      guardianInfo: {
+        id: guardian.id,
+        wardEmail: guardian.ward_email,
+        wardPhoneNumber: guardian.ward_phone_number,
+        linkedWard: null,
+      },
+    };
   }
 
   private hashToken(token: string): string {
