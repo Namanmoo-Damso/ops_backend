@@ -81,7 +81,11 @@ export class AuthService {
   private readonly refreshTokenExpiry: number;
 
   constructor(private readonly dbService: DbService) {
-    this.jwtSecret = process.env.JWT_SECRET || 'default-secret-change-in-production';
+    const secret = process.env.API_JWT_SECRET || process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error('API_JWT_SECRET or JWT_SECRET environment variable is required');
+    }
+    this.jwtSecret = secret;
     this.accessTokenExpiry = 60 * 60; // 1 hour
     this.refreshTokenExpiry = 14 * 24 * 60 * 60; // 2 weeks
   }
@@ -141,11 +145,14 @@ export class AuthService {
     }
 
     const data = await response.json();
+    // 카카오 프로필 이미지 URL을 HTTPS로 변환 (Mixed Content 방지)
+    const profileImage = data.properties?.profile_image ?? null;
+    const httpsProfileImage = profileImage?.replace(/^http:\/\//i, 'https://') ?? null;
     return {
       kakaoId: String(data.id),
       email: data.kakao_account?.email ?? null,
       nickname: data.properties?.nickname ?? null,
-      profileImageUrl: data.properties?.profile_image ?? null,
+      profileImageUrl: httpsProfileImage,
     };
   }
 

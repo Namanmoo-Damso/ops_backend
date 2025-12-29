@@ -55,40 +55,14 @@ function CallbackContent() {
       }
 
       try {
-        // OAuth code를 access token으로 교환
-        let accessToken: string;
+        // 서버에서 authorization code를 access token으로 교환 후 로그인 처리
+        const redirectUri = `${window.location.origin}/login/callback?provider=${provider}`;
+        console.log("[Callback] Sending to server:", { provider, code: code.substring(0, 10) + "...", redirectUri });
 
-        if (provider === "kakao") {
-          const redirectUri = `${window.location.origin}/login/callback?provider=kakao`;
-          const tokenResponse = await fetch("https://kauth.kakao.com/oauth/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              grant_type: "authorization_code",
-              client_id: KAKAO_CLIENT_ID,
-              redirect_uri: redirectUri,
-              code,
-            }),
-          });
-
-          const tokenData = await tokenResponse.json();
-          if (!tokenResponse.ok) {
-            throw new Error(tokenData.error_description || "카카오 토큰 발급 실패");
-          }
-          accessToken = tokenData.access_token;
-        } else if (provider === "google") {
-          // Google은 서버에서 처리 필요 (client secret)
-          // 여기서는 임시로 code를 그대로 전달
-          accessToken = code;
-        } else {
-          throw new Error("지원하지 않는 OAuth provider입니다.");
-        }
-
-        // 서버에 OAuth 로그인 요청
-        const response = await fetch(`${API_BASE}/admin/auth/oauth`, {
+        const response = await fetch(`${API_BASE}/admin/auth/oauth/code`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider, accessToken }),
+          body: JSON.stringify({ provider, code, redirectUri }),
         });
 
         const data = await response.json();
@@ -102,8 +76,12 @@ function CallbackContent() {
         localStorage.setItem("admin_refresh_token", data.refreshToken);
         localStorage.setItem("admin_info", JSON.stringify(data.admin));
 
-        // 대시보드로 이동
-        router.replace("/dashboard");
+        // 조직이 없으면 조직 선택 페이지로, 있으면 대시보드로 이동
+        if (!data.admin.organizationId) {
+          router.replace("/select-organization");
+        } else {
+          router.replace("/dashboard");
+        }
       } catch (err) {
         setStatus("error");
         setError((err as Error).message);

@@ -1180,6 +1180,17 @@ export class AppController {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
+    // Get admin ID from token
+    let adminId: string | undefined;
+    if (authorization?.startsWith('Bearer ')) {
+      try {
+        const tokenPayload = this.authService.verifyAdminAccessToken(authorization.slice(7));
+        adminId = tokenPayload.sub;
+      } catch {
+        // Non-admin token, continue without admin ID
+      }
+    }
+
     if (!file) {
       throw new HttpException('file is required', HttpStatus.BAD_REQUEST);
     }
@@ -1201,7 +1212,7 @@ export class AppController {
       throw new HttpException('Organization not found', HttpStatus.NOT_FOUND);
     }
 
-    this.logger.log(`bulkUploadWards organizationId=${organizationId} fileSize=${file.size}`);
+    this.logger.log(`bulkUploadWards organizationId=${organizationId} adminId=${adminId ?? 'none'} fileSize=${file.size}`);
 
     try {
       // CSV 파싱
@@ -1215,6 +1226,7 @@ export class AppController {
         name?: string;
         birth_date?: string;
         address?: string;
+        notes?: string;
       }>;
 
       const results = {
@@ -1249,7 +1261,7 @@ export class AppController {
             continue;
           }
 
-          // 저장
+          // 저장 (관리자 ID 포함)
           await this.dbService.createOrganizationWard({
             organizationId,
             email,
@@ -1257,6 +1269,8 @@ export class AppController {
             name: record.name.trim(),
             birthDate: record.birth_date?.trim() || null,
             address: record.address?.trim() || null,
+            uploadedByAdminId: adminId,
+            notes: record.notes?.trim() || undefined,
           });
 
           results.created++;
@@ -1271,7 +1285,7 @@ export class AppController {
       }
 
       this.logger.log(
-        `bulkUploadWards completed organizationId=${organizationId} total=${results.total} created=${results.created} skipped=${results.skipped} failed=${results.failed}`,
+        `bulkUploadWards completed organizationId=${organizationId} adminId=${adminId ?? 'none'} total=${results.total} created=${results.created} skipped=${results.skipped} failed=${results.failed}`,
       );
 
       return {
@@ -1282,6 +1296,44 @@ export class AppController {
       this.logger.error(`bulkUploadWards failed error=${(error as Error).message}`);
       throw new HttpException('Failed to process CSV file', HttpStatus.BAD_REQUEST);
     }
+  }
+
+  @Get('/v1/admin/my-wards')
+  async getMyManagedWards(
+    @Headers('authorization') authorization: string | undefined,
+  ) {
+    if (!authorization?.startsWith('Bearer ')) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    const tokenPayload = this.authService.verifyAdminAccessToken(authorization.slice(7));
+    const adminId = tokenPayload.sub;
+
+    const [wards, stats] = await Promise.all([
+      this.dbService.getMyManagedWards(adminId),
+      this.dbService.getMyManagedWardsStats(adminId),
+    ]);
+
+    return {
+      wards: wards.map((w) => ({
+        id: w.id,
+        organizationId: w.organization_id,
+        organizationName: w.organization_name,
+        email: w.email,
+        phoneNumber: w.phone_number,
+        name: w.name,
+        birthDate: w.birth_date,
+        address: w.address,
+        notes: w.notes,
+        isRegistered: w.is_registered,
+        wardId: w.ward_id,
+        createdAt: w.created_at,
+        lastCallAt: w.last_call_at,
+        totalCalls: parseInt(w.total_calls || '0', 10),
+        lastMood: w.last_mood,
+      })),
+      stats,
+    };
   }
 
   // ============================================================
@@ -2028,6 +2080,193 @@ export class AppController {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
+   * POST /admin/auth/oauth/code
+   * OAuth authorization code를 access token으로 교환 후 로그인 처리
+   * (클라이언트에서 client_secret 노출 방지)
+   */
+  @Post('admin/auth/oauth/code')
+  async adminOAuthCodeExchange(
+    @Body() body: { provider?: string; code?: string; redirectUri?: string },
+  ) {
+    const provider = body.provider?.trim().toLowerCase();
+    const code = body.code?.trim();
+    const redirectUri = body.redirectUri?.trim();
+
+    if (!provider || !code || !redirectUri) {
+      throw new HttpException(
+        'provider, code, and redirectUri are required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (provider !== 'kakao' && provider !== 'google') {
+      throw new HttpException(
+        'provider must be kakao or google',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.logger.log(`adminOAuthCodeExchange provider=${provider}`);
+
+    try {
+      // Authorization code를 access token으로 교환
+      const accessToken = await this.exchangeCodeForToken(provider, code, redirectUri);
+
+      // 기존 OAuth 로그인 로직 재사용
+      const oauthUser = await this.verifyOAuthToken(provider, accessToken);
+
+      if (!oauthUser.email) {
+        throw new HttpException(
+          '이메일 정보를 가져올 수 없습니다. 이메일 제공 동의가 필요합니다.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // 기존 관리자 확인
+      let admin = await this.dbService.findAdminByProviderId(provider, oauthUser.providerId);
+
+      if (!admin) {
+        admin = await this.dbService.findAdminByEmail(oauthUser.email);
+
+        if (admin) {
+          throw new HttpException(
+            `이미 ${admin.provider}로 가입된 계정입니다.`,
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        // 첫 번째 관리자는 super_admin, 이후는 admin 권한 부여
+        const newAdmin = await this.dbService.createAdmin({
+          email: oauthUser.email,
+          name: oauthUser.name,
+          provider,
+          providerId: oauthUser.providerId,
+        });
+
+        admin = await this.dbService.findAdminById(newAdmin.id);
+      }
+
+      if (!admin!.is_active) {
+        throw new HttpException(
+          '계정이 비활성화되었습니다. 관리자에게 문의하세요.',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+
+      const jwtPayload = {
+        sub: admin!.id,
+        email: admin!.email,
+        role: admin!.role,
+        type: 'admin',
+      };
+
+      const jwtAccessToken = this.authService.signAdminAccessToken(jwtPayload);
+      const jwtRefreshToken = this.authService.signAdminRefreshToken(jwtPayload);
+
+      const refreshTokenHash = this.authService.hashToken(jwtRefreshToken);
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await this.dbService.createAdminRefreshToken(admin!.id, refreshTokenHash, expiresAt);
+
+      await this.dbService.updateAdminLastLogin(admin!.id);
+
+      this.logger.log(`adminOAuthCodeExchange success adminId=${admin!.id} role=${admin!.role}`);
+
+      return {
+        accessToken: jwtAccessToken,
+        refreshToken: jwtRefreshToken,
+        admin: {
+          id: admin!.id,
+          email: admin!.email,
+          name: admin!.name,
+          role: admin!.role,
+          organizationId: admin!.organization_id,
+        },
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`adminOAuthCodeExchange failed error=${(error as Error).message}`);
+      throw new HttpException(
+        'OAuth 인증에 실패했습니다.',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+  }
+
+  /**
+   * Authorization code를 access token으로 교환
+   */
+  private async exchangeCodeForToken(
+    provider: string,
+    code: string,
+    redirectUri: string,
+  ): Promise<string> {
+    if (provider === 'kakao') {
+      const clientId = process.env.KAKAO_CLIENT_ID;
+      const clientSecret = process.env.KAKAO_CLIENT_SECRET;
+
+      if (!clientId) {
+        throw new Error('KAKAO_CLIENT_ID not configured');
+      }
+
+      const params = new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code,
+      });
+
+      if (clientSecret) {
+        params.append('client_secret', clientSecret);
+      }
+
+      const response = await fetch('https://kauth.kakao.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        this.logger.warn(`Kakao token exchange failed: ${JSON.stringify(data)}`);
+        throw new Error(`Kakao token exchange failed: ${data.error_description || data.error}`);
+      }
+
+      return data.access_token;
+    } else if (provider === 'google') {
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        throw new Error('GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured');
+      }
+
+      const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          code,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        this.logger.warn(`Google token exchange failed: ${JSON.stringify(data)}`);
+        throw new Error(`Google token exchange failed: ${data.error_description || data.error}`);
+      }
+
+      return data.access_token;
+    }
+
+    throw new Error(`Unknown provider: ${provider}`);
+  }
+
+  /**
    * POST /admin/auth/oauth
    * 관제 관리자 OAuth 로그인 (카카오/Google)
    */
@@ -2080,28 +2319,15 @@ export class AppController {
           );
         }
 
-        // 신규 관리자 - 기본적으로 비활성화 (super_admin이 승인 필요)
-        // 첫 번째 관리자는 자동으로 super_admin으로 설정
-        const allAdmins = await this.dbService.getAllAdmins();
-        const isFirstAdmin = allAdmins.length === 0;
-
+        // 첫 번째 관리자는 super_admin, 이후는 admin 권한 부여
         const newAdmin = await this.dbService.createAdmin({
           email: oauthUser.email,
           name: oauthUser.name,
           provider,
           providerId: oauthUser.providerId,
-          role: isFirstAdmin ? 'super_admin' : 'viewer',
         });
 
         admin = await this.dbService.findAdminById(newAdmin.id);
-
-        if (!isFirstAdmin) {
-          // 신규 관리자는 승인 필요
-          throw new HttpException(
-            '관리자 권한이 없습니다. 관리자에게 문의하세요.',
-            HttpStatus.FORBIDDEN,
-          );
-        }
       }
 
       // 비활성화된 관리자 확인
@@ -2246,6 +2472,133 @@ export class AppController {
     }
 
     return { success: true };
+  }
+
+  /**
+   * GET /admin/organizations
+   * 조직 목록 조회
+   */
+  @Get('admin/organizations')
+  async listOrganizations() {
+    const organizations = await this.dbService.listAllOrganizations();
+    return {
+      organizations: organizations.map((org) => ({
+        id: org.id,
+        name: org.name,
+      })),
+    };
+  }
+
+  /**
+   * POST /admin/organizations/find-or-create
+   * 조직 조회 또는 생성
+   */
+  @Post('admin/organizations/find-or-create')
+  async findOrCreateOrganization(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: { name?: string },
+  ) {
+    const accessToken = authorization?.replace('Bearer ', '').trim();
+    const name = body.name?.trim();
+
+    if (!accessToken) {
+      throw new HttpException(
+        'Authorization header is required',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    if (!name) {
+      throw new HttpException(
+        'name is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // 토큰 검증
+    try {
+      this.authService.verifyAdminAccessToken(accessToken);
+    } catch {
+      throw new HttpException('Invalid token', HttpStatus.UNAUTHORIZED);
+    }
+
+    const result = await this.dbService.findOrCreateOrganization(name);
+    this.logger.log(`findOrCreateOrganization name=${name} created=${result.created}`);
+
+    return {
+      organization: {
+        id: result.organization.id,
+        name: result.organization.name,
+      },
+      created: result.created,
+    };
+  }
+
+  /**
+   * PUT /admin/me/organization
+   * 관리자 조직 선택/변경
+   */
+  @Put('admin/me/organization')
+  async updateAdminOrganization(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: { organizationId?: string },
+  ) {
+    const accessToken = authorization?.replace('Bearer ', '').trim();
+    const organizationId = body.organizationId?.trim();
+
+    if (!accessToken) {
+      throw new HttpException(
+        'Authorization header is required',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    if (!organizationId) {
+      throw new HttpException(
+        'organizationId is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const payload = this.authService.verifyAdminAccessToken(accessToken);
+      const admin = await this.dbService.findAdminById(payload.sub);
+
+      if (!admin || !admin.is_active) {
+        throw new HttpException(
+          '계정을 찾을 수 없거나 비활성화되었습니다.',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+
+      // 조직 존재 확인
+      const organization = await this.dbService.findOrganization(organizationId);
+      if (!organization) {
+        throw new HttpException(
+          '조직을 찾을 수 없습니다.',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      await this.dbService.updateAdminOrganization(admin.id, organizationId);
+      this.logger.log(`updateAdminOrganization adminId=${admin.id} organizationId=${organizationId}`);
+
+      return {
+        success: true,
+        organization: {
+          id: organization.id,
+          name: organization.name,
+        },
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      throw new HttpException(
+        '조직 선택에 실패했습니다.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   /**
