@@ -1039,4 +1039,143 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       health_alert: true,
     };
   }
+
+  // ============================================================
+  // Notification Scheduling methods
+  // ============================================================
+
+  async getUpcomingCallSchedules(dayOfWeek: number, startTime: string, endTime: string) {
+    const result = await this.pool.query<{
+      id: string;
+      ward_id: string;
+      ward_user_id: string;
+      ward_identity: string;
+      ai_persona: string;
+      guardian_id: string | null;
+      guardian_user_id: string | null;
+      guardian_identity: string | null;
+    }>(
+      `select
+        cs.id,
+        cs.ward_id,
+        w.user_id as ward_user_id,
+        u.identity as ward_identity,
+        w.ai_persona,
+        w.guardian_id,
+        g.user_id as guardian_user_id,
+        gu.identity as guardian_identity
+       from call_schedules cs
+       join wards w on cs.ward_id = w.id
+       join users u on w.user_id = u.id
+       left join guardians g on w.guardian_id = g.id
+       left join users gu on g.user_id = gu.id
+       where cs.day_of_week = $1
+         and cs.scheduled_time >= $2::time
+         and cs.scheduled_time < $3::time
+         and cs.is_active = true
+         and (cs.reminder_sent_at is null or cs.reminder_sent_at < now() - interval '1 hour')`,
+      [dayOfWeek, startTime, endTime],
+    );
+    return result.rows;
+  }
+
+  async markReminderSent(scheduleId: string) {
+    await this.pool.query(
+      `update call_schedules set reminder_sent_at = now() where id = $1`,
+      [scheduleId],
+    );
+  }
+
+  async getMissedCalls(hoursAgo: number = 1) {
+    const result = await this.pool.query<{
+      ward_id: string;
+      ward_identity: string;
+      guardian_identity: string;
+      guardian_user_id: string;
+    }>(
+      `select
+        w.id as ward_id,
+        u.identity as ward_identity,
+        gu.identity as guardian_identity,
+        g.user_id as guardian_user_id
+       from call_schedules cs
+       join wards w on cs.ward_id = w.id
+       join users u on w.user_id = u.id
+       join guardians g on w.guardian_id = g.id
+       join users gu on g.user_id = gu.id
+       where cs.day_of_week = extract(dow from now() - ($1 || ' hours')::interval)::int
+         and cs.is_active = true
+         and cs.last_called_at < now() - ($1 || ' hours')::interval
+         and not exists (
+           select 1 from calls c
+           where c.callee_user_id = w.user_id
+             and c.state = 'ended'
+             and c.created_at > now() - ($1 || ' hours')::interval
+         )`,
+      [hoursAgo.toString()],
+    );
+    return result.rows;
+  }
+
+  async getCallWithWardInfo(callId: string) {
+    const result = await this.pool.query<{
+      call_id: string;
+      callee_user_id: string | null;
+      callee_identity: string;
+      ward_id: string | null;
+      ward_ai_persona: string | null;
+      guardian_id: string | null;
+      guardian_user_id: string | null;
+      guardian_identity: string | null;
+    }>(
+      `select
+        c.call_id,
+        c.callee_user_id,
+        c.callee_identity,
+        w.id as ward_id,
+        w.ai_persona as ward_ai_persona,
+        w.guardian_id,
+        g.user_id as guardian_user_id,
+        gu.identity as guardian_identity
+       from calls c
+       left join wards w on c.callee_user_id = w.user_id
+       left join guardians g on w.guardian_id = g.id
+       left join users gu on g.user_id = gu.id
+       where c.call_id = $1`,
+      [callId],
+    );
+    return result.rows[0];
+  }
+
+  async createHealthAlert(params: {
+    wardId: string;
+    guardianId: string;
+    alertType: 'warning' | 'info';
+    message: string;
+  }) {
+    const result = await this.pool.query<{ id: string }>(
+      `insert into health_alerts (ward_id, guardian_id, alert_type, message)
+       values ($1, $2, $3, $4)
+       returning id`,
+      [params.wardId, params.guardianId, params.alertType, params.message],
+    );
+    return result.rows[0];
+  }
+
+  async getGuardianNotificationSettings(guardianUserId: string) {
+    const result = await this.pool.query<{
+      call_complete: boolean;
+      health_alert: boolean;
+    }>(
+      `select call_complete, health_alert
+       from notification_settings
+       where user_id = $1
+       limit 1`,
+      [guardianUserId],
+    );
+    if (result.rows[0]) {
+      return result.rows[0];
+    }
+    return { call_complete: true, health_alert: true };
+  }
 }
