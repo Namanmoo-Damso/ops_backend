@@ -84,6 +84,65 @@ export class AppController {
     }
   }
 
+  @Post('/v1/users/register/guardian')
+  async registerGuardian(
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body: {
+      wardEmail?: string;
+      wardPhoneNumber?: string;
+    },
+  ) {
+    // Authorization header에서 temp token 추출
+    const authHeader = authorization ?? '';
+    const tempToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : undefined;
+
+    if (!tempToken) {
+      throw new HttpException('Temp token is required', HttpStatus.UNAUTHORIZED);
+    }
+
+    const wardEmail = body.wardEmail?.trim();
+    const wardPhoneNumber = body.wardPhoneNumber?.trim();
+
+    if (!wardEmail) {
+      throw new HttpException('wardEmail is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!wardPhoneNumber) {
+      throw new HttpException('wardPhoneNumber is required', HttpStatus.BAD_REQUEST);
+    }
+
+    // 간단한 이메일 형식 검증
+    if (!wardEmail.includes('@')) {
+      throw new HttpException('Invalid email format', HttpStatus.BAD_REQUEST);
+    }
+
+    // 간단한 전화번호 형식 검증 (숫자와 하이픈만 허용)
+    if (!/^[\d-]+$/.test(wardPhoneNumber)) {
+      throw new HttpException('Invalid phone number format', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      this.logger.log(`registerGuardian wardEmail=${wardEmail}`);
+      const result = await this.authService.registerGuardian({
+        tempToken,
+        wardEmail,
+        wardPhoneNumber,
+      });
+      return result;
+    } catch (error) {
+      if ((error as HttpException).getStatus?.() === HttpStatus.UNAUTHORIZED) {
+        throw error;
+      }
+      this.logger.warn(`registerGuardian failed error=${(error as Error).message}`);
+      throw new HttpException(
+        (error as Error).message || 'Registration failed',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Get('/v1/rooms/:roomName/members')
   async listRoomMembers(
     @Headers('authorization') authorization: string | undefined,
