@@ -1260,6 +1260,227 @@ export class AppController {
     }
   }
 
+  // ============================================================
+  // Location Endpoints
+  // ============================================================
+
+  @Post('/v1/locations')
+  async updateLocation(
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body: {
+      latitude?: number;
+      longitude?: number;
+      accuracy?: number;
+      timestamp?: string;
+    },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    // 위도 검증
+    if (body.latitude === undefined || typeof body.latitude !== 'number') {
+      throw new HttpException('latitude is required', HttpStatus.BAD_REQUEST);
+    }
+    if (body.latitude < -90 || body.latitude > 90) {
+      throw new HttpException('latitude must be between -90 and 90', HttpStatus.BAD_REQUEST);
+    }
+
+    // 경도 검증
+    if (body.longitude === undefined || typeof body.longitude !== 'number') {
+      throw new HttpException('longitude is required', HttpStatus.BAD_REQUEST);
+    }
+    if (body.longitude < -180 || body.longitude > 180) {
+      throw new HttpException('longitude must be between -180 and 180', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const user = await this.dbService.findUserById(payload.sub);
+      if (!user || user.user_type !== 'ward') {
+        throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
+      }
+
+      const ward = await this.dbService.findWardByUserId(user.id);
+      if (!ward) {
+        throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
+      }
+
+      const recordedAt = body.timestamp ? new Date(body.timestamp) : new Date();
+      const accuracy = body.accuracy ?? null;
+
+      this.logger.log(
+        `updateLocation wardId=${ward.id} lat=${body.latitude} lng=${body.longitude}`,
+      );
+
+      // 위치 이력 저장
+      await this.dbService.createWardLocation({
+        wardId: ward.id,
+        latitude: body.latitude,
+        longitude: body.longitude,
+        accuracy,
+        recordedAt,
+      });
+
+      // 현재 위치 업데이트
+      const currentLocation = await this.dbService.upsertWardCurrentLocation({
+        wardId: ward.id,
+        latitude: body.latitude,
+        longitude: body.longitude,
+        accuracy,
+      });
+
+      return {
+        success: true,
+        wardId: ward.id,
+        latitude: parseFloat(currentLocation.latitude),
+        longitude: parseFloat(currentLocation.longitude),
+        lastUpdated: currentLocation.last_updated,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateLocation failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update location', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/admin/locations')
+  async getAdminLocations(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('organizationId') organizationId?: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    this.logger.log(`getAdminLocations organizationId=${organizationId ?? 'all'}`);
+
+    try {
+      const locations = await this.dbService.getAllWardCurrentLocations(organizationId);
+
+      return {
+        locations: locations.map((loc) => ({
+          wardId: loc.ward_id,
+          wardName: loc.ward_nickname || loc.ward_name || '이름 없음',
+          latitude: parseFloat(loc.latitude),
+          longitude: parseFloat(loc.longitude),
+          accuracy: loc.accuracy ? parseFloat(loc.accuracy) : null,
+          lastUpdated: loc.last_updated,
+          status: loc.status,
+          organizationId: loc.organization_id,
+        })),
+      };
+    } catch (error) {
+      this.logger.warn(`getAdminLocations failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get locations', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('/v1/admin/locations/:wardId/history')
+  async getAdminLocationHistory(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!wardId?.trim()) {
+      throw new HttpException('wardId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    this.logger.log(`getAdminLocationHistory wardId=${wardId} from=${from ?? 'none'} to=${to ?? 'none'}`);
+
+    try {
+      // ward 존재 확인
+      const ward = await this.dbService.findWardById(wardId);
+      if (!ward) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      const history = await this.dbService.getWardLocationHistory({
+        wardId,
+        from: from ? new Date(from) : undefined,
+        to: to ? new Date(to) : undefined,
+        limit: limit ? parseInt(limit, 10) : 100,
+      });
+
+      return {
+        wardId,
+        history: history.map((loc) => ({
+          latitude: parseFloat(loc.latitude),
+          longitude: parseFloat(loc.longitude),
+          accuracy: loc.accuracy ? parseFloat(loc.accuracy) : null,
+          timestamp: loc.recorded_at,
+        })),
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`getAdminLocationHistory failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to get location history', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('/v1/admin/locations/:wardId/status')
+  async updateAdminLocationStatus(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('wardId') wardId: string,
+    @Body() body: { status?: string },
+  ) {
+    const config = this.appService.getConfig();
+    const auth = this.appService.getAuthContext(authorization);
+    if (config.authRequired && !auth) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    if (!wardId?.trim()) {
+      throw new HttpException('wardId is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const status = body.status?.trim();
+    if (!status || !['normal', 'warning', 'emergency'].includes(status)) {
+      throw new HttpException(
+        'status must be one of: normal, warning, emergency',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.logger.log(`updateAdminLocationStatus wardId=${wardId} status=${status}`);
+
+    try {
+      const ward = await this.dbService.findWardById(wardId);
+      if (!ward) {
+        throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
+      }
+
+      await this.dbService.updateWardLocationStatus(
+        wardId,
+        status as 'normal' | 'warning' | 'emergency',
+      );
+
+      return {
+        success: true,
+        wardId,
+        status,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`updateAdminLocationStatus failed error=${(error as Error).message}`);
+      throw new HttpException('Failed to update status', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   private isValidEmail(email: string): boolean {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
