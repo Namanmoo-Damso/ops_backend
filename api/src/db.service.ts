@@ -1178,4 +1178,102 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     }
     return { call_complete: true, health_alert: true };
   }
+
+  // ============================================================
+  // Call Analysis methods
+  // ============================================================
+
+  async getCallForAnalysis(callId: string) {
+    const result = await this.pool.query<{
+      call_id: string;
+      callee_user_id: string | null;
+      ward_id: string | null;
+      guardian_id: string | null;
+      duration: number | null;
+      transcript: string | null;
+    }>(
+      `select
+        c.call_id,
+        c.callee_user_id,
+        w.id as ward_id,
+        w.guardian_id,
+        extract(epoch from (c.ended_at - c.answered_at))/60 as duration,
+        null as transcript  -- 추후 녹취록 연동 시 확장
+       from calls c
+       left join wards w on c.callee_user_id = w.user_id
+       where c.call_id = $1`,
+      [callId],
+    );
+    return result.rows[0];
+  }
+
+  async createCallSummary(params: {
+    callId: string;
+    wardId: string | null;
+    summary: string;
+    mood: string;
+    moodScore: number;
+    tags: string[];
+    healthKeywords: Record<string, unknown>;
+  }) {
+    const result = await this.pool.query<{
+      id: string;
+      call_id: string;
+      ward_id: string | null;
+      summary: string;
+      mood: string;
+      mood_score: number;
+      tags: string[];
+      health_keywords: Record<string, unknown>;
+      created_at: string;
+    }>(
+      `insert into call_summaries (call_id, ward_id, summary, mood, mood_score, tags, health_keywords)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       returning id, call_id, ward_id, summary, mood, mood_score, tags, health_keywords, created_at`,
+      [
+        params.callId,
+        params.wardId,
+        params.summary,
+        params.mood,
+        params.moodScore,
+        params.tags,
+        JSON.stringify(params.healthKeywords),
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async getRecentPainMentions(wardId: string, days: number) {
+    const result = await this.pool.query<{ count: string }>(
+      `select count(*) as count
+       from call_summaries
+       where ward_id = $1
+         and created_at > now() - ($2 || ' days')::interval
+         and (health_keywords->>'pain')::int > 0`,
+      [wardId, days.toString()],
+    );
+    return parseInt(result.rows[0]?.count || '0', 10);
+  }
+
+  async getCallSummary(callId: string) {
+    const result = await this.pool.query<{
+      id: string;
+      call_id: string;
+      ward_id: string | null;
+      summary: string;
+      mood: string;
+      mood_score: number;
+      tags: string[];
+      health_keywords: Record<string, unknown>;
+      created_at: string;
+    }>(
+      `select id, call_id, ward_id, summary, mood, mood_score, tags, health_keywords, created_at
+       from call_summaries
+       where call_id = $1
+       order by created_at desc
+       limit 1`,
+      [callId],
+    );
+    return result.rows[0];
+  }
 }
