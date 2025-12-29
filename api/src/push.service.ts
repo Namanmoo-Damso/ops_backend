@@ -98,6 +98,9 @@ export class PushService implements OnModuleDestroy {
     title?: string;
     body?: string;
     payload?: Record<string, unknown>;
+    category?: string;
+    sound?: string;
+    interruptionLevel?: 'passive' | 'active' | 'time-sensitive' | 'critical';
   }): Promise<PushResult> {
     this.ensureReady();
     const invalidTokens: string[] = [];
@@ -105,7 +108,7 @@ export class PushService implements OnModuleDestroy {
     let failed = 0;
     const topic = this.resolveTopic(params.type);
     this.logger.log(
-      `sendPush type=${params.type} topic=${topic} tokens=${params.tokens.length}`,
+      `sendPush type=${params.type} topic=${topic} tokens=${params.tokens.length} category=${params.category ?? 'none'}`,
     );
 
     for (const batch of chunk(params.tokens, 100)) {
@@ -133,7 +136,13 @@ export class PushService implements OnModuleDestroy {
               body: params.body ?? '',
             };
           }
-          notification.sound = 'default';
+          notification.sound = params.sound ?? 'default';
+          if (params.category) {
+            notification.category = params.category;
+          }
+          if (params.interruptionLevel) {
+            notification.interruptionLevel = params.interruptionLevel;
+          }
         } else {
           notification.contentAvailable = true;
         }

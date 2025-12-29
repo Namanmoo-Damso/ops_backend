@@ -13,6 +13,7 @@ type DeviceRow = {
   platform: string;
   apns_token: string | null;
   voip_token: string | null;
+  supports_callkit: boolean;
   env: string;
   last_seen: string;
 };
@@ -78,22 +79,24 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     env: string;
     apnsToken?: string;
     voipToken?: string;
+    supportsCallKit?: boolean;
   }) {
     const user = await this.upsertUser(params.identity, params.displayName);
-    const baseParams = [user.id, params.platform];
+    const supportsCallKit = params.supportsCallKit ?? true;
     let device: DeviceRow | undefined;
 
     if (params.apnsToken) {
       const result = await this.pool.query<DeviceRow>(
-        `insert into devices (user_id, platform, apns_token, env, last_seen)
-         values ($1, $2, $3, $4, now())
+        `insert into devices (user_id, platform, apns_token, supports_callkit, env, last_seen)
+         values ($1, $2, $3, $4, $5, now())
          on conflict (apns_token)
          do update set user_id = excluded.user_id,
            platform = excluded.platform,
+           supports_callkit = excluded.supports_callkit,
            env = excluded.env,
            last_seen = now()
-         returning id, user_id, platform, apns_token, voip_token, env, last_seen`,
-        [...baseParams, params.apnsToken, params.env],
+         returning id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen`,
+        [user.id, params.platform, params.apnsToken, supportsCallKit, params.env],
       );
       device = result.rows[0];
     }
@@ -108,23 +111,24 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
         );
         const result = await this.pool.query<DeviceRow>(
           `update devices
-           set voip_token = $1, env = $2, last_seen = now()
-           where id = $3
-           returning id, user_id, platform, apns_token, voip_token, env, last_seen`,
-          [params.voipToken, params.env, device.id],
+           set voip_token = $1, supports_callkit = $2, env = $3, last_seen = now()
+           where id = $4
+           returning id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen`,
+          [params.voipToken, supportsCallKit, params.env, device.id],
         );
         device = result.rows[0];
       } else {
         const result = await this.pool.query<DeviceRow>(
-          `insert into devices (user_id, platform, voip_token, env, last_seen)
-           values ($1, $2, $3, $4, now())
+          `insert into devices (user_id, platform, voip_token, supports_callkit, env, last_seen)
+           values ($1, $2, $3, $4, $5, now())
            on conflict (voip_token)
            do update set user_id = excluded.user_id,
              platform = excluded.platform,
+             supports_callkit = excluded.supports_callkit,
              env = excluded.env,
              last_seen = now()
-           returning id, user_id, platform, apns_token, voip_token, env, last_seen`,
-          [...baseParams, params.voipToken, params.env],
+           returning id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen`,
+          [user.id, params.platform, params.voipToken, supportsCallKit, params.env],
         );
         device = result.rows[0];
       }
@@ -151,6 +155,28 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
        join users u on d.user_id = u.id
        where u.identity = $1
          and d.${tokenColumn} is not null${envFilter}`,
+      values,
+    );
+    return result.rows;
+  }
+
+  async listAllDevicesByIdentity(params: { identity: string; env?: string }) {
+    const values: Array<string> = [params.identity];
+    let envFilter = '';
+    if (params.env) {
+      values.push(params.env);
+      envFilter = ` and d.env = $${values.length}`;
+    }
+    const result = await this.pool.query<{
+      apns_token: string | null;
+      voip_token: string | null;
+      supports_callkit: boolean;
+      env: string;
+    }>(
+      `select d.apns_token, d.voip_token, d.supports_callkit, d.env
+       from devices d
+       join users u on d.user_id = u.id
+       where u.identity = $1${envFilter}`,
       values,
     );
     return result.rows;

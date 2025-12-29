@@ -3,7 +3,7 @@
   acme_ca https://acme.zerossl.com/v2/DV90
 }
 
-2.sodam.store {
+1.sodam.store {
   # LiveKit 관련 경로를 먼저 처리
   handle /rtc* {
     reverse_proxy 127.0.0.1:7880
