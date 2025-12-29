@@ -1293,6 +1293,52 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     return result.rows[0];
   }
 
+  async listAllOrganizations() {
+    const result = await this.pool.query<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>(
+      `select id, name, created_at from organizations order by name`,
+    );
+    return result.rows;
+  }
+
+  async findOrCreateOrganization(name: string) {
+    // 먼저 기존 조직 찾기
+    const existing = await this.pool.query<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>(
+      `select id, name, created_at from organizations where name = $1`,
+      [name],
+    );
+
+    if (existing.rows[0]) {
+      return { organization: existing.rows[0], created: false };
+    }
+
+    // 없으면 새로 생성
+    const result = await this.pool.query<{
+      id: string;
+      name: string;
+      created_at: string;
+    }>(
+      `insert into organizations (name) values ($1) returning id, name, created_at`,
+      [name],
+    );
+
+    return { organization: result.rows[0], created: true };
+  }
+
+  async updateAdminOrganization(adminId: string, organizationId: string) {
+    await this.pool.query(
+      `update admins set organization_id = $1, updated_at = now() where id = $2`,
+      [organizationId, adminId],
+    );
+  }
+
   async findOrganizationWard(organizationId: string, email: string) {
     const result = await this.pool.query<{
       id: string;
@@ -1315,28 +1361,34 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     name: string;
     birthDate: string | null;
     address: string | null;
+    uploadedByAdminId?: string;
+    notes?: string;
   }) {
     const result = await this.pool.query<{
       id: string;
       organization_id: string;
+      uploaded_by_admin_id: string | null;
       email: string;
       phone_number: string;
       name: string;
       birth_date: string | null;
       address: string | null;
+      notes: string | null;
       is_registered: boolean;
       created_at: string;
     }>(
-      `insert into organization_wards (organization_id, email, phone_number, name, birth_date, address)
-       values ($1, $2, $3, $4, $5, $6)
-       returning id, organization_id, email, phone_number, name, birth_date, address, is_registered, created_at`,
+      `insert into organization_wards (organization_id, uploaded_by_admin_id, email, phone_number, name, birth_date, address, notes)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       returning id, organization_id, uploaded_by_admin_id, email, phone_number, name, birth_date, address, notes, is_registered, created_at`,
       [
         params.organizationId,
+        params.uploadedByAdminId ?? null,
         params.email,
         params.phoneNumber,
         params.name,
         params.birthDate,
         params.address,
+        params.notes ?? null,
       ],
     );
     return result.rows[0];
@@ -1350,17 +1402,90 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       name: string;
       birth_date: string | null;
       address: string | null;
+      notes: string | null;
       is_registered: boolean;
       ward_id: string | null;
+      uploaded_by_admin_id: string | null;
       created_at: string;
     }>(
-      `select id, email, phone_number, name, birth_date, address, is_registered, ward_id, created_at
+      `select id, email, phone_number, name, birth_date, address, notes, is_registered, ward_id, uploaded_by_admin_id, created_at
        from organization_wards
        where organization_id = $1
        order by created_at desc`,
       [organizationId],
     );
     return result.rows;
+  }
+
+  async getMyManagedWards(adminId: string) {
+    const result = await this.pool.query<{
+      id: string;
+      organization_id: string;
+      organization_name: string;
+      email: string;
+      phone_number: string;
+      name: string;
+      birth_date: string | null;
+      address: string | null;
+      notes: string | null;
+      is_registered: boolean;
+      ward_id: string | null;
+      created_at: string;
+      last_call_at: string | null;
+      total_calls: string;
+      last_mood: string | null;
+    }>(
+      `select
+        ow.id, ow.organization_id, o.name as organization_name,
+        ow.email, ow.phone_number, ow.name, ow.birth_date, ow.address, ow.notes,
+        ow.is_registered, ow.ward_id, ow.created_at,
+        (select max(c.created_at) from calls c
+         join wards w on c.callee_user_id = w.user_id
+         where w.id = ow.ward_id) as last_call_at,
+        (select count(*) from calls c
+         join wards w on c.callee_user_id = w.user_id
+         where w.id = ow.ward_id and c.state = 'ended')::text as total_calls,
+        (select cs.mood from call_summaries cs
+         where cs.ward_id = ow.ward_id
+         order by cs.created_at desc limit 1) as last_mood
+       from organization_wards ow
+       join organizations o on ow.organization_id = o.id
+       where ow.uploaded_by_admin_id = $1
+       order by ow.created_at desc`,
+      [adminId],
+    );
+    return result.rows;
+  }
+
+  async getMyManagedWardsStats(adminId: string) {
+    const result = await this.pool.query<{
+      total: string;
+      registered: string;
+      pending: string;
+      positive_mood: string;
+      negative_mood: string;
+    }>(
+      `select
+        count(*)::text as total,
+        count(*) filter (where is_registered = true)::text as registered,
+        count(*) filter (where is_registered = false)::text as pending,
+        (select count(*) from call_summaries cs
+         join organization_wards ow2 on cs.ward_id = ow2.ward_id
+         where ow2.uploaded_by_admin_id = $1 and cs.mood = 'positive')::text as positive_mood,
+        (select count(*) from call_summaries cs
+         join organization_wards ow2 on cs.ward_id = ow2.ward_id
+         where ow2.uploaded_by_admin_id = $1 and cs.mood = 'negative')::text as negative_mood
+       from organization_wards
+       where uploaded_by_admin_id = $1`,
+      [adminId],
+    );
+    return {
+      total: parseInt(result.rows[0]?.total || '0', 10),
+      registered: parseInt(result.rows[0]?.registered || '0', 10),
+      pending: parseInt(result.rows[0]?.pending || '0', 10),
+      positiveMood: parseInt(result.rows[0]?.positive_mood || '0', 10),
+      negativeMood: parseInt(result.rows[0]?.negative_mood || '0', 10),
+    };
   }
 
   // ============================================================
@@ -1803,5 +1928,480 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       [wardId],
     );
     return result.rows[0];
+  }
+
+  // ============================================================
+  // Dashboard Statistics methods
+  // ============================================================
+
+  async getDashboardOverview() {
+    const result = await this.pool.query<{
+      total_wards: string;
+      active_wards: string;
+      total_guardians: string;
+      total_organizations: string;
+      total_calls: string;
+      total_call_minutes: string;
+    }>(
+      `select
+        (select count(*) from wards) as total_wards,
+        (select count(distinct w.id) from wards w
+         join ward_current_locations wcl on w.id = wcl.ward_id
+         where wcl.last_updated > now() - interval '24 hours') as active_wards,
+        (select count(*) from guardians) as total_guardians,
+        (select count(*) from organizations) as total_organizations,
+        (select count(*) from calls where state = 'ended') as total_calls,
+        (select coalesce(sum(extract(epoch from (ended_at - answered_at))/60), 0)
+         from calls where state = 'ended' and answered_at is not null) as total_call_minutes`,
+    );
+    return {
+      totalWards: parseInt(result.rows[0].total_wards, 10),
+      activeWards: parseInt(result.rows[0].active_wards, 10),
+      totalGuardians: parseInt(result.rows[0].total_guardians, 10),
+      totalOrganizations: parseInt(result.rows[0].total_organizations, 10),
+      totalCalls: parseInt(result.rows[0].total_calls, 10),
+      totalCallMinutes: Math.round(parseFloat(result.rows[0].total_call_minutes)),
+    };
+  }
+
+  async getTodayStats() {
+    const result = await this.pool.query<{
+      calls: string;
+      avg_duration: string | null;
+      emergencies: string;
+      new_registrations: string;
+    }>(
+      `select
+        (select count(*) from calls
+         where created_at >= current_date and state = 'ended') as calls,
+        (select avg(extract(epoch from (ended_at - answered_at))/60)
+         from calls
+         where created_at >= current_date and state = 'ended' and answered_at is not null) as avg_duration,
+        (select count(*) from emergencies
+         where created_at >= current_date) as emergencies,
+        (select count(*) from wards
+         where created_at >= current_date) as new_registrations`,
+    );
+    return {
+      calls: parseInt(result.rows[0].calls, 10),
+      avgDuration: Math.round(parseFloat(result.rows[0].avg_duration || '0')),
+      emergencies: parseInt(result.rows[0].emergencies, 10),
+      newRegistrations: parseInt(result.rows[0].new_registrations, 10),
+    };
+  }
+
+  async getWeeklyTrend() {
+    // 최근 7일간의 통화 및 비상 현황
+    const result = await this.pool.query<{
+      day: string;
+      day_label: string;
+      calls: string;
+      emergencies: string;
+    }>(
+      `with days as (
+        select generate_series(
+          current_date - interval '6 days',
+          current_date,
+          '1 day'::interval
+        )::date as day
+      )
+      select
+        d.day::text,
+        to_char(d.day, 'Dy') as day_label,
+        coalesce((
+          select count(*) from calls c
+          where c.created_at::date = d.day and c.state = 'ended'
+        ), 0)::text as calls,
+        coalesce((
+          select count(*) from emergencies e
+          where e.created_at::date = d.day
+        ), 0)::text as emergencies
+      from days d
+      order by d.day`,
+    );
+
+    const dayLabels: Record<string, string> = {
+      Mon: '월',
+      Tue: '화',
+      Wed: '수',
+      Thu: '목',
+      Fri: '금',
+      Sat: '토',
+      Sun: '일',
+    };
+
+    return {
+      calls: result.rows.map((r) => parseInt(r.calls, 10)),
+      emergencies: result.rows.map((r) => parseInt(r.emergencies, 10)),
+      labels: result.rows.map((r) => dayLabels[r.day_label] || r.day_label),
+    };
+  }
+
+  async getMoodDistribution() {
+    const result = await this.pool.query<{
+      positive: string;
+      neutral: string;
+      negative: string;
+    }>(
+      `select
+        (select count(*) from call_summaries where mood = 'positive')::text as positive,
+        (select count(*) from call_summaries where mood = 'neutral')::text as neutral,
+        (select count(*) from call_summaries where mood = 'negative')::text as negative`,
+    );
+    const positive = parseInt(result.rows[0].positive, 10);
+    const neutral = parseInt(result.rows[0].neutral, 10);
+    const negative = parseInt(result.rows[0].negative, 10);
+    const total = positive + neutral + negative;
+
+    if (total === 0) {
+      return { positive: 0, neutral: 0, negative: 0 };
+    }
+
+    return {
+      positive: Math.round((positive / total) * 100),
+      neutral: Math.round((neutral / total) * 100),
+      negative: Math.round((negative / total) * 100),
+    };
+  }
+
+  async getHealthAlertsSummary() {
+    const result = await this.pool.query<{
+      warning: string;
+      info: string;
+      unread: string;
+    }>(
+      `select
+        (select count(*) from health_alerts where alert_type = 'warning')::text as warning,
+        (select count(*) from health_alerts where alert_type = 'info')::text as info,
+        (select count(*) from health_alerts where is_read = false)::text as unread`,
+    );
+    return {
+      warning: parseInt(result.rows[0].warning, 10),
+      info: parseInt(result.rows[0].info, 10),
+      unread: parseInt(result.rows[0].unread, 10),
+    };
+  }
+
+  async getTopHealthKeywords(limit: number = 5) {
+    const result = await this.pool.query<{
+      health_keywords: Record<string, unknown> | null;
+    }>(
+      `select health_keywords
+       from call_summaries
+       where health_keywords is not null
+         and created_at > now() - interval '30 days'`,
+    );
+
+    const keywordCounts: Record<string, number> = {};
+    const keywordLabels: Record<string, string> = {
+      pain: '통증',
+      sleep: '수면',
+      meal: '식사',
+      medication: '약 복용',
+    };
+
+    for (const row of result.rows) {
+      if (row.health_keywords) {
+        for (const [key, value] of Object.entries(row.health_keywords)) {
+          if (typeof value === 'number') {
+            keywordCounts[key] = (keywordCounts[key] || 0) + value;
+          } else if (value) {
+            keywordCounts[key] = (keywordCounts[key] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    return Object.entries(keywordCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([keyword, count]) => ({
+        keyword: keywordLabels[keyword] || keyword,
+        count,
+      }));
+  }
+
+  async getOrganizationStats() {
+    const result = await this.pool.query<{
+      id: string;
+      name: string;
+      wards: string;
+      calls: string;
+    }>(
+      `select
+        o.id,
+        o.name,
+        (select count(*) from wards w where w.organization_id = o.id)::text as wards,
+        (select count(*) from calls c
+         join wards w on c.callee_user_id = w.user_id
+         where w.organization_id = o.id and c.state = 'ended')::text as calls
+       from organizations o
+       order by wards desc`,
+    );
+    return result.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      wards: parseInt(r.wards, 10),
+      calls: parseInt(r.calls, 10),
+    }));
+  }
+
+  async getRealtimeStats() {
+    const result = await this.pool.query<{
+      active_calls: string;
+      online_wards: string;
+      pending_emergencies: string;
+    }>(
+      `select
+        (select count(*) from calls where state = 'answered')::text as active_calls,
+        (select count(*) from ward_current_locations
+         where last_updated > now() - interval '5 minutes')::text as online_wards,
+        (select count(*) from emergencies where status = 'active')::text as pending_emergencies`,
+    );
+    return {
+      activeCalls: parseInt(result.rows[0].active_calls, 10),
+      onlineWards: parseInt(result.rows[0].online_wards, 10),
+      pendingEmergencies: parseInt(result.rows[0].pending_emergencies, 10),
+    };
+  }
+
+  async getRecentActivity(limit: number = 10) {
+    // 최근 통화 및 비상 상황 활동
+    const callsResult = await this.pool.query<{
+      type: string;
+      ward_name: string | null;
+      duration: string | null;
+      time: string;
+      created_at: string;
+    }>(
+      `(
+        select
+          'call_started' as type,
+          u.nickname as ward_name,
+          null as duration,
+          to_char(c.created_at, 'HH24:MI') as time,
+          c.created_at
+        from calls c
+        join users u on c.callee_user_id = u.id
+        where c.state in ('ringing', 'answered')
+          and c.created_at > now() - interval '1 hour'
+      )
+      union all
+      (
+        select
+          'call_ended' as type,
+          u.nickname as ward_name,
+          extract(epoch from (c.ended_at - c.answered_at))/60 as duration,
+          to_char(c.ended_at, 'HH24:MI') as time,
+          c.ended_at as created_at
+        from calls c
+        join users u on c.callee_user_id = u.id
+        where c.state = 'ended'
+          and c.ended_at > now() - interval '1 hour'
+          and c.answered_at is not null
+      )
+      union all
+      (
+        select
+          'emergency' as type,
+          u.nickname as ward_name,
+          null as duration,
+          to_char(e.created_at, 'HH24:MI') as time,
+          e.created_at
+        from emergencies e
+        join wards w on e.ward_id = w.id
+        join users u on w.user_id = u.id
+        where e.created_at > now() - interval '24 hours'
+      )
+      order by created_at desc
+      limit $1`,
+      [limit],
+    );
+
+    return callsResult.rows.map((r) => ({
+      type: r.type,
+      wardName: r.ward_name || '알 수 없음',
+      duration: r.duration ? Math.round(parseFloat(r.duration)) : undefined,
+      time: r.time,
+    }));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // [관리자 관리] - Issue #18
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async findAdminByProviderId(provider: string, providerId: string) {
+    const result = await this.pool.query<{
+      id: string;
+      email: string;
+      name: string | null;
+      provider: string;
+      provider_id: string;
+      role: string;
+      organization_id: string | null;
+      is_active: boolean;
+      last_login_at: string | null;
+      created_at: string;
+    }>(
+      `select * from admins where provider = $1 and provider_id = $2`,
+      [provider, providerId],
+    );
+    return result.rows[0] || null;
+  }
+
+  async findAdminByEmail(email: string) {
+    const result = await this.pool.query<{
+      id: string;
+      email: string;
+      name: string | null;
+      provider: string;
+      provider_id: string;
+      role: string;
+      organization_id: string | null;
+      is_active: boolean;
+      last_login_at: string | null;
+      created_at: string;
+    }>(
+      `select * from admins where email = $1`,
+      [email],
+    );
+    return result.rows[0] || null;
+  }
+
+  async findAdminById(adminId: string) {
+    const result = await this.pool.query<{
+      id: string;
+      email: string;
+      name: string | null;
+      provider: string;
+      provider_id: string;
+      role: string;
+      organization_id: string | null;
+      is_active: boolean;
+      last_login_at: string | null;
+      created_at: string;
+    }>(
+      `select * from admins where id = $1`,
+      [adminId],
+    );
+    return result.rows[0] || null;
+  }
+
+  async createAdmin(params: {
+    email: string;
+    name?: string;
+    provider: string;
+    providerId: string;
+    role?: string;
+    organizationId?: string;
+  }) {
+    // 모든 관리자에게 admin 권한 부여 (첫 번째는 super_admin)
+    const countResult = await this.pool.query<{ count: string }>(
+      `select count(*) as count from admins`,
+    );
+    const isFirstAdmin = parseInt(countResult.rows[0].count, 10) === 0;
+    const role = isFirstAdmin ? 'super_admin' : (params.role || 'admin');
+
+    const result = await this.pool.query<{ id: string }>(
+      `insert into admins (email, name, provider, provider_id, role, organization_id)
+       values ($1, $2, $3, $4, $5, $6)
+       returning id`,
+      [
+        params.email,
+        params.name || null,
+        params.provider,
+        params.providerId,
+        role,
+        params.organizationId || null,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async updateAdminLastLogin(adminId: string) {
+    await this.pool.query(
+      `update admins set last_login_at = now(), updated_at = now() where id = $1`,
+      [adminId],
+    );
+  }
+
+  async getAdminPermissions(adminId: string) {
+    const result = await this.pool.query<{ permission: string }>(
+      `select permission from admin_permissions where admin_id = $1`,
+      [adminId],
+    );
+    return result.rows.map((r) => r.permission);
+  }
+
+  async createAdminRefreshToken(adminId: string, tokenHash: string, expiresAt: Date) {
+    const result = await this.pool.query<{ id: string }>(
+      `insert into admin_refresh_tokens (admin_id, token_hash, expires_at)
+       values ($1, $2, $3)
+       returning id`,
+      [adminId, tokenHash, expiresAt],
+    );
+    return result.rows[0];
+  }
+
+  async findAdminRefreshToken(tokenHash: string) {
+    const result = await this.pool.query<{
+      id: string;
+      admin_id: string;
+      expires_at: string;
+    }>(
+      `select id, admin_id, expires_at from admin_refresh_tokens
+       where token_hash = $1 and expires_at > now()`,
+      [tokenHash],
+    );
+    return result.rows[0] || null;
+  }
+
+  async deleteAdminRefreshToken(tokenHash: string) {
+    await this.pool.query(
+      `delete from admin_refresh_tokens where token_hash = $1`,
+      [tokenHash],
+    );
+  }
+
+  async deleteAllAdminRefreshTokens(adminId: string) {
+    await this.pool.query(
+      `delete from admin_refresh_tokens where admin_id = $1`,
+      [adminId],
+    );
+  }
+
+  async getAllAdmins() {
+    const result = await this.pool.query<{
+      id: string;
+      email: string;
+      name: string | null;
+      provider: string;
+      role: string;
+      organization_id: string | null;
+      organization_name: string | null;
+      is_active: boolean;
+      last_login_at: string | null;
+      created_at: string;
+    }>(
+      `select a.*, o.name as organization_name
+       from admins a
+       left join organizations o on a.organization_id = o.id
+       order by a.created_at desc`,
+    );
+    return result.rows;
+  }
+
+  async updateAdminRole(adminId: string, role: string, organizationId?: string) {
+    await this.pool.query(
+      `update admins set role = $1, organization_id = $2, updated_at = now() where id = $3`,
+      [role, organizationId || null, adminId],
+    );
+  }
+
+  async updateAdminActiveStatus(adminId: string, isActive: boolean) {
+    await this.pool.query(
+      `update admins set is_active = $1, updated_at = now() where id = $2`,
+      [isActive, adminId],
+    );
   }
 }

@@ -81,7 +81,11 @@ export class AuthService {
   private readonly refreshTokenExpiry: number;
 
   constructor(private readonly dbService: DbService) {
-    this.jwtSecret = process.env.JWT_SECRET || 'default-secret-change-in-production';
+    const secret = process.env.API_JWT_SECRET || process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error('API_JWT_SECRET or JWT_SECRET environment variable is required');
+    }
+    this.jwtSecret = secret;
     this.accessTokenExpiry = 60 * 60; // 1 hour
     this.refreshTokenExpiry = 14 * 24 * 60 * 60; // 2 weeks
   }
@@ -141,11 +145,14 @@ export class AuthService {
     }
 
     const data = await response.json();
+    // 카카오 프로필 이미지 URL을 HTTPS로 변환 (Mixed Content 방지)
+    const profileImage = data.properties?.profile_image ?? null;
+    const httpsProfileImage = profileImage?.replace(/^http:\/\//i, 'https://') ?? null;
     return {
       kakaoId: String(data.id),
       email: data.kakao_account?.email ?? null,
       nickname: data.properties?.nickname ?? null,
-      profileImageUrl: data.properties?.profile_image ?? null,
+      profileImageUrl: httpsProfileImage,
     };
   }
 
@@ -379,7 +386,67 @@ export class AuthService {
     };
   }
 
-  private hashToken(token: string): string {
+  hashToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // [관리자 JWT] - Issue #18
+  // ─────────────────────────────────────────────────────────────────────────
+
+  signAdminAccessToken(payload: {
+    sub: string;
+    email: string;
+    role: string;
+    type: string;
+  }): string {
+    return jwt.sign(
+      { ...payload, tokenType: 'admin_access' },
+      this.jwtSecret,
+      { expiresIn: '1h' },
+    );
+  }
+
+  signAdminRefreshToken(payload: {
+    sub: string;
+    email: string;
+    role: string;
+    type: string;
+  }): string {
+    return jwt.sign(
+      { ...payload, tokenType: 'admin_refresh' },
+      this.jwtSecret,
+      { expiresIn: '30d' },
+    );
+  }
+
+  verifyAdminAccessToken(token: string): {
+    sub: string;
+    email: string;
+    role: string;
+    type: string;
+  } {
+    try {
+      const payload = jwt.verify(token, this.jwtSecret) as {
+        sub: string;
+        email: string;
+        role: string;
+        type: string;
+        tokenType: string;
+      };
+
+      if (payload.tokenType !== 'admin_access') {
+        throw new UnauthorizedException('Invalid admin access token');
+      }
+
+      return {
+        sub: payload.sub,
+        email: payload.email,
+        role: payload.role,
+        type: payload.type,
+      };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired admin access token');
+    }
   }
 }
