@@ -52,6 +52,16 @@ type RefreshTokenRow = {
   created_at: string;
 };
 
+type GuardianWardRegistrationRow = {
+  id: string;
+  guardian_id: string;
+  ward_email: string;
+  ward_phone_number: string;
+  linked_ward_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type DeviceRow = {
   id: string;
   user_id: string | null;
@@ -376,5 +386,590 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       [callId, state],
     );
     return result.rows[0];
+  }
+
+  // ============================================================
+  // Auth related methods
+  // ============================================================
+
+  async findUserByKakaoId(kakaoId: string) {
+    const result = await this.pool.query<UserRow>(
+      `select id, identity, display_name, user_type, email, nickname,
+              profile_image_url, kakao_id, created_at, updated_at
+       from users
+       where kakao_id = $1
+       limit 1`,
+      [kakaoId],
+    );
+    return result.rows[0];
+  }
+
+  async findUserById(userId: string) {
+    const result = await this.pool.query<UserRow>(
+      `select id, identity, display_name, user_type, email, nickname,
+              profile_image_url, kakao_id, created_at, updated_at
+       from users
+       where id = $1
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0];
+  }
+
+  async findGuardianByWardEmail(wardEmail: string) {
+    const result = await this.pool.query<GuardianRow>(
+      `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
+       from guardians
+       where ward_email = $1
+       limit 1`,
+      [wardEmail],
+    );
+    return result.rows[0];
+  }
+
+  async createUserWithKakao(params: {
+    kakaoId: string;
+    email: string | null;
+    nickname: string | null;
+    profileImageUrl: string | null;
+    userType: 'guardian' | 'ward';
+  }) {
+    const identity = `kakao_${params.kakaoId}`;
+    const result = await this.pool.query<UserRow>(
+      `insert into users (identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, now())
+       returning id, identity, display_name, user_type, email, nickname, profile_image_url, kakao_id, created_at, updated_at`,
+      [
+        identity,
+        params.nickname,
+        params.userType,
+        params.email,
+        params.nickname,
+        params.profileImageUrl,
+        params.kakaoId,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async createWard(params: {
+    userId: string;
+    phoneNumber: string;
+    guardianId: string | null;
+  }) {
+    const result = await this.pool.query<WardRow>(
+      `insert into wards (user_id, phone_number, guardian_id, updated_at)
+       values ($1, $2, $3, now())
+       returning id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at`,
+      [params.userId, params.phoneNumber, params.guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async createGuardian(params: {
+    userId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    const result = await this.pool.query<GuardianRow>(
+      `insert into guardians (user_id, ward_email, ward_phone_number, updated_at)
+       values ($1, $2, $3, now())
+       returning id, user_id, ward_email, ward_phone_number, created_at, updated_at`,
+      [params.userId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
+  async saveRefreshToken(params: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+  }) {
+    await this.pool.query(
+      `insert into refresh_tokens (user_id, token_hash, expires_at)
+       values ($1, $2, $3)`,
+      [params.userId, params.tokenHash, params.expiresAt.toISOString()],
+    );
+  }
+
+  async findRefreshToken(tokenHash: string) {
+    const result = await this.pool.query<RefreshTokenRow>(
+      `select id, user_id, token_hash, expires_at, created_at
+       from refresh_tokens
+       where token_hash = $1 and expires_at > now()
+       limit 1`,
+      [tokenHash],
+    );
+    return result.rows[0];
+  }
+
+  async deleteRefreshToken(tokenHash: string) {
+    await this.pool.query(
+      `delete from refresh_tokens where token_hash = $1`,
+      [tokenHash],
+    );
+  }
+
+  async deleteUserRefreshTokens(userId: string) {
+    await this.pool.query(
+      `delete from refresh_tokens where user_id = $1`,
+      [userId],
+    );
+  }
+
+  async findGuardianByUserId(userId: string) {
+    const result = await this.pool.query<GuardianRow>(
+      `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
+       from guardians
+       where user_id = $1
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0];
+  }
+
+  async findWardByUserId(userId: string) {
+    const result = await this.pool.query<WardRow>(
+      `select id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at
+       from wards
+       where user_id = $1
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0];
+  }
+
+  async findWardByGuardianId(guardianId: string) {
+    const result = await this.pool.query<WardRow & { user_nickname: string | null; user_profile_image_url: string | null }>(
+      `select w.id, w.user_id, w.phone_number, w.guardian_id, w.organization_id, w.ai_persona,
+              w.weekly_call_count, w.call_duration_minutes, w.created_at, w.updated_at,
+              u.nickname as user_nickname, u.profile_image_url as user_profile_image_url
+       from wards w
+       join users u on w.user_id = u.id
+       where w.guardian_id = $1
+       limit 1`,
+      [guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async findGuardianById(guardianId: string) {
+    const result = await this.pool.query<GuardianRow & { user_nickname: string | null; user_profile_image_url: string | null }>(
+      `select g.id, g.user_id, g.ward_email, g.ward_phone_number, g.created_at, g.updated_at,
+              u.nickname as user_nickname, u.profile_image_url as user_profile_image_url
+       from guardians g
+       join users u on g.user_id = u.id
+       where g.id = $1
+       limit 1`,
+      [guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async deleteUser(userId: string) {
+    // 1. Delete refresh tokens
+    await this.pool.query(
+      `delete from refresh_tokens where user_id = $1`,
+      [userId],
+    );
+
+    // 2. Unlink wards from guardian (if user is a guardian)
+    const guardian = await this.findGuardianByUserId(userId);
+    if (guardian) {
+      await this.pool.query(
+        `update wards set guardian_id = null where guardian_id = $1`,
+        [guardian.id],
+      );
+      await this.pool.query(
+        `delete from guardians where id = $1`,
+        [guardian.id],
+      );
+    }
+
+    // 3. Delete ward record if user is a ward
+    await this.pool.query(
+      `delete from wards where user_id = $1`,
+      [userId],
+    );
+
+    // 4. Delete user
+    await this.pool.query(
+      `delete from users where id = $1`,
+      [userId],
+    );
+  }
+
+  // ============================================================
+  // Dashboard related methods
+  // ============================================================
+
+  async getWardCallStats(wardId: string) {
+    const result = await this.pool.query<{
+      total_calls: string;
+      avg_duration: string | null;
+    }>(
+      `select
+        count(*) as total_calls,
+        avg(extract(epoch from (c.ended_at - c.answered_at))/60) as avg_duration
+       from calls c
+       where c.callee_user_id = (select user_id from wards where id = $1)
+         and c.state = 'ended'
+         and c.answered_at is not null`,
+      [wardId],
+    );
+    return {
+      totalCalls: parseInt(result.rows[0]?.total_calls || '0', 10),
+      avgDuration: Math.round(parseFloat(result.rows[0]?.avg_duration || '0')),
+    };
+  }
+
+  async getWardWeeklyCallChange(wardId: string) {
+    const result = await this.pool.query<{ this_week: string; last_week: string }>(
+      `select
+        (select count(*) from calls c
+         where c.callee_user_id = (select user_id from wards where id = $1)
+           and c.state = 'ended'
+           and c.created_at >= now() - interval '7 days') as this_week,
+        (select count(*) from calls c
+         where c.callee_user_id = (select user_id from wards where id = $1)
+           and c.state = 'ended'
+           and c.created_at >= now() - interval '14 days'
+           and c.created_at < now() - interval '7 days') as last_week`,
+      [wardId],
+    );
+    const thisWeek = parseInt(result.rows[0]?.this_week || '0', 10);
+    const lastWeek = parseInt(result.rows[0]?.last_week || '0', 10);
+    return thisWeek - lastWeek;
+  }
+
+  async getWardMoodStats(wardId: string) {
+    const result = await this.pool.query<{ mood: string; count: string }>(
+      `select mood, count(*) as count
+       from call_summaries
+       where ward_id = $1
+         and mood is not null
+       group by mood`,
+      [wardId],
+    );
+    let positive = 0;
+    let negative = 0;
+    let neutral = 0;
+    for (const row of result.rows) {
+      const count = parseInt(row.count, 10);
+      if (row.mood === 'positive') positive = count;
+      else if (row.mood === 'negative') negative = count;
+      else neutral = count;
+    }
+    const total = positive + negative + neutral;
+    if (total === 0) {
+      return { positive: 0, negative: 0 };
+    }
+    return {
+      positive: Math.round((positive / total) * 100),
+      negative: Math.round((negative / total) * 100),
+    };
+  }
+
+  async getHealthAlerts(guardianId: string, limit: number = 5) {
+    const result = await this.pool.query<{
+      id: string;
+      alert_type: string;
+      message: string;
+      is_read: boolean;
+      created_at: string;
+    }>(
+      `select id, alert_type, message, is_read, created_at
+       from health_alerts
+       where guardian_id = $1
+       order by created_at desc
+       limit $2`,
+      [guardianId, limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      type: row.alert_type,
+      message: row.message,
+      date: row.created_at.split('T')[0],
+      isRead: row.is_read,
+    }));
+  }
+
+  async getRecentCallSummaries(wardId: string, limit: number = 5) {
+    const result = await this.pool.query<{
+      id: string;
+      call_id: string;
+      summary: string | null;
+      mood: string | null;
+      tags: string[] | null;
+      created_at: string;
+      call_duration: string | null;
+    }>(
+      `select
+        cs.id, cs.call_id, cs.summary, cs.mood, cs.tags, cs.created_at,
+        extract(epoch from (c.ended_at - c.answered_at))/60 as call_duration
+       from call_summaries cs
+       left join calls c on cs.call_id = c.call_id
+       where cs.ward_id = $1
+       order by cs.created_at desc
+       limit $2`,
+      [wardId, limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      date: row.created_at,
+      duration: Math.round(parseFloat(row.call_duration || '0')),
+      summary: row.summary || '',
+      tags: row.tags || [],
+      mood: row.mood || 'neutral',
+    }));
+  }
+
+  // ============================================================
+  // Report related methods
+  // ============================================================
+
+  async getEmotionTrend(wardId: string, days: number) {
+    const result = await this.pool.query<{
+      date: string;
+      score: string | null;
+      mood: string | null;
+    }>(
+      `select
+        to_char(created_at, 'YYYY-MM-DD') as date,
+        avg(mood_score) as score,
+        mode() within group (order by mood) as mood
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+       group by to_char(created_at, 'YYYY-MM-DD')
+       order by date`,
+      [wardId, days.toString()],
+    );
+    return result.rows.map((row) => ({
+      date: row.date,
+      score: parseFloat(row.score || '0'),
+      mood: row.mood || 'neutral',
+    }));
+  }
+
+  async getHealthKeywordStats(wardId: string, days: number) {
+    const result = await this.pool.query<{
+      health_keywords: Record<string, unknown> | null;
+    }>(
+      `select health_keywords
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+         and health_keywords is not null`,
+      [wardId, days.toString()],
+    );
+
+    const keywordCounts: Record<string, number> = {};
+    for (const row of result.rows) {
+      if (row.health_keywords) {
+        for (const [key, value] of Object.entries(row.health_keywords)) {
+          if (typeof value === 'number') {
+            keywordCounts[key] = (keywordCounts[key] || 0) + value;
+          } else {
+            keywordCounts[key] = (keywordCounts[key] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    return {
+      pain: { count: keywordCounts['pain'] || 0, trend: 'stable' },
+      sleep: { status: 'normal', mentions: keywordCounts['sleep'] || 0 },
+      meal: { status: 'regular', mentions: keywordCounts['meal'] || 0 },
+      medication: { status: 'compliant', mentions: keywordCounts['medication'] || 0 },
+    };
+  }
+
+  async getTopTopics(wardId: string, days: number, limit: number = 5) {
+    const result = await this.pool.query<{ tags: string[] | null }>(
+      `select tags
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+         and tags is not null`,
+      [wardId, days.toString()],
+    );
+
+    const topicCounts: Record<string, number> = {};
+    for (const row of result.rows) {
+      if (row.tags) {
+        for (const tag of row.tags) {
+          topicCounts[tag] = (topicCounts[tag] || 0) + 1;
+        }
+      }
+    }
+
+    return Object.entries(topicCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([topic, count]) => ({ topic, count }));
+  }
+
+  async getCallSummariesForReport(wardId: string, days: number) {
+    const result = await this.pool.query<{
+      summary: string | null;
+      mood: string | null;
+      health_keywords: Record<string, unknown> | null;
+    }>(
+      `select summary, mood, health_keywords
+       from call_summaries
+       where ward_id = $1
+         and created_at >= now() - ($2 || ' days')::interval
+       order by created_at desc`,
+      [wardId, days.toString()],
+    );
+    return result.rows;
+  }
+
+  // ============================================================
+  // Guardian Ward Management methods
+  // ============================================================
+
+  async getGuardianWards(guardianId: string) {
+    // 1차 등록 (guardians 테이블) + 추가 등록 (guardian_ward_registrations 테이블)
+    // 연결된 ward 정보도 함께 조회
+    const result = await this.pool.query<{
+      id: string;
+      ward_email: string;
+      ward_phone_number: string;
+      is_primary: boolean;
+      linked_ward_id: string | null;
+      ward_user_id: string | null;
+      ward_nickname: string | null;
+      ward_profile_image_url: string | null;
+      last_call_at: string | null;
+    }>(
+      `-- Primary registration from guardians table
+       select
+         g.id,
+         g.ward_email,
+         g.ward_phone_number,
+         true as is_primary,
+         w.id as linked_ward_id,
+         w.user_id as ward_user_id,
+         u.nickname as ward_nickname,
+         u.profile_image_url as ward_profile_image_url,
+         (select max(c.created_at) from calls c where c.callee_user_id = w.user_id) as last_call_at
+       from guardians g
+       left join wards w on w.guardian_id = g.id
+       left join users u on w.user_id = u.id
+       where g.id = $1
+
+       union all
+
+       -- Additional registrations from guardian_ward_registrations table
+       select
+         gwr.id,
+         gwr.ward_email,
+         gwr.ward_phone_number,
+         false as is_primary,
+         gwr.linked_ward_id,
+         w.user_id as ward_user_id,
+         u.nickname as ward_nickname,
+         u.profile_image_url as ward_profile_image_url,
+         (select max(c.created_at) from calls c where c.callee_user_id = w.user_id) as last_call_at
+       from guardian_ward_registrations gwr
+       left join wards w on gwr.linked_ward_id = w.id
+       left join users u on w.user_id = u.id
+       where gwr.guardian_id = $1
+
+       order by is_primary desc, ward_email`,
+      [guardianId],
+    );
+    return result.rows;
+  }
+
+  async createGuardianWardRegistration(params: {
+    guardianId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    const result = await this.pool.query<GuardianWardRegistrationRow>(
+      `insert into guardian_ward_registrations (guardian_id, ward_email, ward_phone_number, updated_at)
+       values ($1, $2, $3, now())
+       returning id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at`,
+      [params.guardianId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
+  async findGuardianWardRegistration(id: string, guardianId: string) {
+    const result = await this.pool.query<GuardianWardRegistrationRow>(
+      `select id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at
+       from guardian_ward_registrations
+       where id = $1 and guardian_id = $2
+       limit 1`,
+      [id, guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async updateGuardianWardRegistration(params: {
+    id: string;
+    guardianId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    const result = await this.pool.query<GuardianWardRegistrationRow>(
+      `update guardian_ward_registrations
+       set ward_email = $3, ward_phone_number = $4, updated_at = now()
+       where id = $1 and guardian_id = $2
+       returning id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at`,
+      [params.id, params.guardianId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
+  async deleteGuardianWardRegistration(id: string, guardianId: string) {
+    // 연결된 ward가 있으면 guardian_id를 null로 설정
+    await this.pool.query(
+      `update wards
+       set guardian_id = null
+       where id = (
+         select linked_ward_id from guardian_ward_registrations
+         where id = $1 and guardian_id = $2
+       )`,
+      [id, guardianId],
+    );
+
+    // registration 삭제
+    const result = await this.pool.query(
+      `delete from guardian_ward_registrations
+       where id = $1 and guardian_id = $2
+       returning id`,
+      [id, guardianId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async updateGuardianPrimaryWard(params: {
+    guardianId: string;
+    wardEmail: string;
+    wardPhoneNumber: string;
+  }) {
+    // 1차 등록 정보 (guardians 테이블) 수정
+    const result = await this.pool.query<GuardianRow>(
+      `update guardians
+       set ward_email = $2, ward_phone_number = $3, updated_at = now()
+       where id = $1
+       returning id, user_id, ward_email, ward_phone_number, created_at, updated_at`,
+      [params.guardianId, params.wardEmail, params.wardPhoneNumber],
+    );
+    return result.rows[0];
+  }
+
+  async unlinkPrimaryWard(guardianId: string) {
+    // 1차 등록된 ward의 연결 해제 (wards.guardian_id = null)
+    await this.pool.query(
+      `update wards
+       set guardian_id = null
+       where guardian_id = $1`,
+      [guardianId],
+    );
   }
 }

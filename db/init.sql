@@ -203,3 +203,22 @@ create table if not exists refresh_tokens (
 create index if not exists idx_refresh_tokens_user_id on refresh_tokens(user_id);
 create index if not exists idx_refresh_tokens_expires_at on refresh_tokens(expires_at);
 create index if not exists idx_refresh_tokens_token_hash on refresh_tokens(token_hash);
+
+-- =============================================================================
+-- 13. GUARDIAN_WARD_REGISTRATIONS (보호자-피보호자 추가 등록)
+-- =============================================================================
+-- 보호자가 추가로 등록한 피보호자 정보 (다중 피보호자 지원)
+-- 1차 등록은 guardians.ward_email/ward_phone_number 사용
+create table if not exists guardian_ward_registrations (
+  id uuid primary key default gen_random_uuid(),
+  guardian_id uuid references guardians(id) on delete cascade,
+  ward_email text not null,
+  ward_phone_number text not null,
+  linked_ward_id uuid references wards(id) on delete set null,  -- 실제 매칭 시 연결
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_gwr_guardian_id on guardian_ward_registrations(guardian_id);
+create index if not exists idx_gwr_ward_email on guardian_ward_registrations(ward_email);
+create index if not exists idx_gwr_linked_ward_id on guardian_ward_registrations(linked_ward_id);
