@@ -39,12 +39,37 @@ export class AppController {
     return { status: 'ok', ts: new Date().toISOString() };
   }
 
+  /**
+   * POST /webhook/kakao/unlink
+   * 카카오 연결 해제 웹훅 (연동해제/카카오계정 탈퇴)
+   *
+   * 카카오 웹훅 스펙:
+   * - Content-Type: application/x-www-form-urlencoded
+   * - Header: Authorization: KakaoAK ${ADMIN_KEY}
+   * - Body: app_id, user_id, referrer_type
+   * - 3초 내 무조건 200 응답 필수
+   *
+   * referrer_type:
+   * - TALK_CHANNEL_FRIEND: 카카오톡 채널에서 연결 끊기
+   * - KAKAO_ACCOUNT: 카카오계정 설정에서 연결 끊기/탈퇴
+   */
   @Post('/webhook/kakao/unlink')
   async kakaoUnlink(
-    @Body() body: { user_id?: string; referrer_type?: string },
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: { app_id?: string; user_id?: string; referrer_type?: string },
   ) {
-    const kakaoId = body.user_id?.trim();
+    // 카카오 웹훅 인증 확인 (선택적 - 보안 강화 시 활성화)
+    // const expectedAuth = `KakaoAK ${process.env.KAKAO_ADMIN_KEY}`;
+    // if (authorization !== expectedAuth) {
+    //   this.logger.warn('kakaoUnlink unauthorized');
+    //   return { success: true }; // 여전히 200 응답
+    // }
+
+    const appId = body.app_id?.toString().trim();
+    const kakaoId = body.user_id?.toString().trim();
     const referrerType = body.referrer_type ?? 'unknown';
+
+    this.logger.log(`kakaoUnlink received appId=${appId} kakaoId=${kakaoId} type=${referrerType}`);
 
     if (!kakaoId) {
       // 카카오 웹훅은 반드시 200 응답해야 함
@@ -52,25 +77,24 @@ export class AppController {
       return { success: true };
     }
 
-    this.logger.log(`kakaoUnlink kakaoId=${kakaoId} type=${referrerType}`);
+    // 비동기로 처리하되 3초 이내 응답 보장
+    setImmediate(async () => {
+      try {
+        const user = await this.dbService.findUserByKakaoId(kakaoId);
+        if (!user) {
+          this.logger.log(`kakaoUnlink user not found kakaoId=${kakaoId}`);
+          return;
+        }
 
-    try {
-      const user = await this.dbService.findUserByKakaoId(kakaoId);
-      if (!user) {
-        // 이미 탈퇴했거나 없는 사용자
-        this.logger.log(`kakaoUnlink user not found kakaoId=${kakaoId}`);
-        return { success: true };
+        await this.dbService.deleteUser(user.id);
+        this.logger.log(`kakaoUnlink deleted userId=${user.id} kakaoId=${kakaoId}`);
+      } catch (error) {
+        this.logger.error(`kakaoUnlink failed kakaoId=${kakaoId} error=${(error as Error).message}`);
       }
+    });
 
-      await this.dbService.deleteUser(user.id);
-      this.logger.log(`kakaoUnlink deleted userId=${user.id}`);
-
-      return { success: true };
-    } catch (error) {
-      // 웹훅은 에러가 나도 200 응답
-      this.logger.error(`kakaoUnlink failed kakaoId=${kakaoId} error=${(error as Error).message}`);
-      return { success: true };
-    }
+    // 즉시 200 응답
+    return { success: true };
   }
 
   @Post('/v1/auth/kakao')
@@ -1997,6 +2021,329 @@ export class AppController {
       this.logger.warn(`getDashboardRealtime failed error=${(error as Error).message}`);
       throw new HttpException('Failed to fetch realtime stats', HttpStatus.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // [관제 관리자 OAuth API] - Issue #18
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * POST /admin/auth/oauth
+   * 관제 관리자 OAuth 로그인 (카카오/Google)
+   */
+  @Post('admin/auth/oauth')
+  async adminOAuthLogin(
+    @Body() body: { provider?: string; accessToken?: string },
+  ) {
+    const provider = body.provider?.trim().toLowerCase();
+    const accessToken = body.accessToken?.trim();
+
+    if (!provider || !accessToken) {
+      throw new HttpException(
+        'provider and accessToken are required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (provider !== 'kakao' && provider !== 'google') {
+      throw new HttpException(
+        'provider must be kakao or google',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.logger.log(`adminOAuthLogin provider=${provider}`);
+
+    try {
+      // OAuth 토큰 검증
+      const oauthUser = await this.verifyOAuthToken(provider, accessToken);
+
+      if (!oauthUser.email) {
+        throw new HttpException(
+          '이메일 정보를 가져올 수 없습니다. 이메일 제공 동의가 필요합니다.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // 기존 관리자 확인
+      let admin = await this.dbService.findAdminByProviderId(provider, oauthUser.providerId);
+
+      if (!admin) {
+        // 이메일로 기존 관리자 확인 (다른 provider로 가입했을 수 있음)
+        admin = await this.dbService.findAdminByEmail(oauthUser.email);
+
+        if (admin) {
+          // 다른 provider로 이미 가입된 경우
+          throw new HttpException(
+            `이미 ${admin.provider}로 가입된 계정입니다.`,
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        // 신규 관리자 - 기본적으로 비활성화 (super_admin이 승인 필요)
+        // 첫 번째 관리자는 자동으로 super_admin으로 설정
+        const allAdmins = await this.dbService.getAllAdmins();
+        const isFirstAdmin = allAdmins.length === 0;
+
+        const newAdmin = await this.dbService.createAdmin({
+          email: oauthUser.email,
+          name: oauthUser.name,
+          provider,
+          providerId: oauthUser.providerId,
+          role: isFirstAdmin ? 'super_admin' : 'viewer',
+        });
+
+        admin = await this.dbService.findAdminById(newAdmin.id);
+
+        if (!isFirstAdmin) {
+          // 신규 관리자는 승인 필요
+          throw new HttpException(
+            '관리자 권한이 없습니다. 관리자에게 문의하세요.',
+            HttpStatus.FORBIDDEN,
+          );
+        }
+      }
+
+      // 비활성화된 관리자 확인
+      if (!admin!.is_active) {
+        throw new HttpException(
+          '계정이 비활성화되었습니다. 관리자에게 문의하세요.',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+
+      // JWT 토큰 발급
+      const jwtPayload = {
+        sub: admin!.id,
+        email: admin!.email,
+        role: admin!.role,
+        type: 'admin',
+      };
+
+      const jwtAccessToken = this.authService.signAdminAccessToken(jwtPayload);
+      const jwtRefreshToken = this.authService.signAdminRefreshToken(jwtPayload);
+
+      // 리프레시 토큰 저장
+      const refreshTokenHash = this.authService.hashToken(jwtRefreshToken);
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30일
+      await this.dbService.createAdminRefreshToken(admin!.id, refreshTokenHash, expiresAt);
+
+      // 마지막 로그인 시간 업데이트
+      await this.dbService.updateAdminLastLogin(admin!.id);
+
+      this.logger.log(`adminOAuthLogin success adminId=${admin!.id} role=${admin!.role}`);
+
+      return {
+        accessToken: jwtAccessToken,
+        refreshToken: jwtRefreshToken,
+        admin: {
+          id: admin!.id,
+          email: admin!.email,
+          name: admin!.name,
+          role: admin!.role,
+          organizationId: admin!.organization_id,
+        },
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`adminOAuthLogin failed error=${(error as Error).message}`);
+      throw new HttpException(
+        'OAuth 인증에 실패했습니다.',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+  }
+
+  /**
+   * POST /admin/auth/refresh
+   * 관제 관리자 토큰 갱신
+   */
+  @Post('admin/auth/refresh')
+  async adminRefreshToken(
+    @Body() body: { refreshToken?: string },
+  ) {
+    const refreshToken = body.refreshToken?.trim();
+
+    if (!refreshToken) {
+      throw new HttpException(
+        'refreshToken is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const tokenHash = this.authService.hashToken(refreshToken);
+      const storedToken = await this.dbService.findAdminRefreshToken(tokenHash);
+
+      if (!storedToken) {
+        throw new HttpException(
+          '유효하지 않은 리프레시 토큰입니다.',
+          HttpStatus.UNAUTHORIZED,
+        );
+      }
+
+      const admin = await this.dbService.findAdminById(storedToken.admin_id);
+      if (!admin || !admin.is_active) {
+        await this.dbService.deleteAdminRefreshToken(tokenHash);
+        throw new HttpException(
+          '계정이 비활성화되었습니다.',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+
+      // 기존 리프레시 토큰 삭제
+      await this.dbService.deleteAdminRefreshToken(tokenHash);
+
+      // 새 토큰 발급
+      const jwtPayload = {
+        sub: admin.id,
+        email: admin.email,
+        role: admin.role,
+        type: 'admin',
+      };
+
+      const newAccessToken = this.authService.signAdminAccessToken(jwtPayload);
+      const newRefreshToken = this.authService.signAdminRefreshToken(jwtPayload);
+
+      // 새 리프레시 토큰 저장
+      const newTokenHash = this.authService.hashToken(newRefreshToken);
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await this.dbService.createAdminRefreshToken(admin.id, newTokenHash, expiresAt);
+
+      this.logger.log(`adminRefreshToken success adminId=${admin.id}`);
+
+      return {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn(`adminRefreshToken failed error=${(error as Error).message}`);
+      throw new HttpException(
+        '토큰 갱신에 실패했습니다.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * POST /admin/auth/logout
+   * 관제 관리자 로그아웃
+   */
+  @Post('admin/auth/logout')
+  async adminLogout(
+    @Body() body: { refreshToken?: string },
+  ) {
+    const refreshToken = body.refreshToken?.trim();
+
+    if (refreshToken) {
+      const tokenHash = this.authService.hashToken(refreshToken);
+      await this.dbService.deleteAdminRefreshToken(tokenHash);
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * GET /admin/me
+   * 현재 관리자 정보 조회
+   */
+  @Get('admin/me')
+  async getAdminMe(
+    @Headers('authorization') authorization: string | undefined,
+  ) {
+    const accessToken = authorization?.replace('Bearer ', '').trim();
+
+    if (!accessToken) {
+      throw new HttpException(
+        'Authorization header is required',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    try {
+      const payload = this.authService.verifyAdminAccessToken(accessToken);
+      const admin = await this.dbService.findAdminById(payload.sub);
+
+      if (!admin || !admin.is_active) {
+        throw new HttpException(
+          '계정을 찾을 수 없거나 비활성화되었습니다.',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+
+      const permissions = await this.dbService.getAdminPermissions(admin.id);
+
+      return {
+        admin: {
+          id: admin.id,
+          email: admin.email,
+          name: admin.name,
+          role: admin.role,
+          organizationId: admin.organization_id,
+          permissions,
+        },
+      };
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      throw new HttpException(
+        '인증에 실패했습니다.',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+  }
+
+  // OAuth 토큰 검증 헬퍼
+  private async verifyOAuthToken(
+    provider: string,
+    accessToken: string,
+  ): Promise<{ providerId: string; email?: string; name?: string }> {
+    if (provider === 'kakao') {
+      return this.verifyKakaoToken(accessToken);
+    } else if (provider === 'google') {
+      return this.verifyGoogleToken(accessToken);
+    }
+    throw new Error(`Unknown provider: ${provider}`);
+  }
+
+  private async verifyKakaoToken(accessToken: string) {
+    const response = await fetch('https://kapi.kakao.com/v2/user/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      throw new Error('Kakao token verification failed');
+    }
+
+    const data = await response.json();
+    return {
+      providerId: String(data.id),
+      email: data.kakao_account?.email,
+      name: data.properties?.nickname,
+    };
+  }
+
+  private async verifyGoogleToken(accessToken: string) {
+    const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      throw new Error('Google token verification failed');
+    }
+
+    const data = await response.json();
+    return {
+      providerId: data.sub,
+      email: data.email,
+      name: data.name,
+    };
   }
 
   private isValidEmail(email: string): boolean {
