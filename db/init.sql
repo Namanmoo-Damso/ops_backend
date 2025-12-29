@@ -266,3 +266,36 @@ create table if not exists organization_wards (
 create index if not exists idx_org_wards_org_id on organization_wards(organization_id);
 create index if not exists idx_org_wards_email on organization_wards(email);
 create index if not exists idx_org_wards_is_registered on organization_wards(is_registered);
+
+-- =============================================================================
+-- 16. WARD_LOCATIONS (피보호자 위치 이력)
+-- =============================================================================
+-- 모바일에서 전송받은 피보호자 실시간 위치정보 이력
+create table if not exists ward_locations (
+  id uuid primary key default gen_random_uuid(),
+  ward_id uuid references wards(id) on delete cascade,
+  latitude decimal(10, 8) not null,
+  longitude decimal(11, 8) not null,
+  accuracy decimal(6, 2),
+  recorded_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_ward_locations_ward_id on ward_locations(ward_id);
+create index if not exists idx_ward_locations_recorded_at on ward_locations(recorded_at);
+create index if not exists idx_ward_locations_ward_recorded on ward_locations(ward_id, recorded_at desc);
+
+-- =============================================================================
+-- 17. WARD_CURRENT_LOCATIONS (피보호자 최신 위치)
+-- =============================================================================
+-- 최신 위치만 빠르게 조회하기 위한 테이블
+create table if not exists ward_current_locations (
+  ward_id uuid primary key references wards(id) on delete cascade,
+  latitude decimal(10, 8) not null,
+  longitude decimal(11, 8) not null,
+  accuracy decimal(6, 2),
+  status text not null default 'normal',  -- 'normal' | 'warning' | 'emergency'
+  last_updated timestamptz not null
+);
+
+create index if not exists idx_ward_current_locations_status on ward_current_locations(status);
