@@ -506,4 +506,86 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       [userId],
     );
   }
+
+  async findGuardianByUserId(userId: string) {
+    const result = await this.pool.query<GuardianRow>(
+      `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
+       from guardians
+       where user_id = $1
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0];
+  }
+
+  async findWardByUserId(userId: string) {
+    const result = await this.pool.query<WardRow>(
+      `select id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at
+       from wards
+       where user_id = $1
+       limit 1`,
+      [userId],
+    );
+    return result.rows[0];
+  }
+
+  async findWardByGuardianId(guardianId: string) {
+    const result = await this.pool.query<WardRow & { user_nickname: string | null; user_profile_image_url: string | null }>(
+      `select w.id, w.user_id, w.phone_number, w.guardian_id, w.organization_id, w.ai_persona,
+              w.weekly_call_count, w.call_duration_minutes, w.created_at, w.updated_at,
+              u.nickname as user_nickname, u.profile_image_url as user_profile_image_url
+       from wards w
+       join users u on w.user_id = u.id
+       where w.guardian_id = $1
+       limit 1`,
+      [guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async findGuardianById(guardianId: string) {
+    const result = await this.pool.query<GuardianRow & { user_nickname: string | null; user_profile_image_url: string | null }>(
+      `select g.id, g.user_id, g.ward_email, g.ward_phone_number, g.created_at, g.updated_at,
+              u.nickname as user_nickname, u.profile_image_url as user_profile_image_url
+       from guardians g
+       join users u on g.user_id = u.id
+       where g.id = $1
+       limit 1`,
+      [guardianId],
+    );
+    return result.rows[0];
+  }
+
+  async deleteUser(userId: string) {
+    // 1. Delete refresh tokens
+    await this.pool.query(
+      `delete from refresh_tokens where user_id = $1`,
+      [userId],
+    );
+
+    // 2. Unlink wards from guardian (if user is a guardian)
+    const guardian = await this.findGuardianByUserId(userId);
+    if (guardian) {
+      await this.pool.query(
+        `update wards set guardian_id = null where guardian_id = $1`,
+        [guardian.id],
+      );
+      await this.pool.query(
+        `delete from guardians where id = $1`,
+        [guardian.id],
+      );
+    }
+
+    // 3. Delete ward record if user is a ward
+    await this.pool.query(
+      `delete from wards where user_id = $1`,
+      [userId],
+    );
+
+    // 4. Delete user
+    await this.pool.query(
+      `delete from users where id = $1`,
+      [userId],
+    );
+  }
 }
