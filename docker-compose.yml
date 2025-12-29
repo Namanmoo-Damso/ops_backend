@@ -16,15 +16,6 @@ services:
       - caddy_config:/config
     restart: unless-stopped
 
-  duckdns:
-    image: lscr.io/linuxserver/duckdns:latest
-    env_file:
-      - ./duckdns.env
-    environment:
-      - TZ=Asia/Seoul
-      - LOG_FILE=false
-    restart: unless-stopped
-
   db:
     image: postgres:16
     env_file:

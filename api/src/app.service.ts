@@ -264,13 +264,14 @@ export class AppService {
     env?: string;
     apnsToken?: string;
     voipToken?: string;
+    supportsCallKit?: boolean;
   }) {
     if (!params.apnsToken && !params.voipToken) {
       throw new Error('apnsToken or voipToken is required');
     }
     const env = this.normalizeEnv(params.env ?? getConfig().apnsDefaultEnv);
     this.logger.log(
-      `registerDevice identity=${params.identity} env=${env} apns=${this.summarizeToken(params.apnsToken)} voip=${this.summarizeToken(params.voipToken)}`,
+      `registerDevice identity=${params.identity} env=${env} supportsCallKit=${params.supportsCallKit ?? true} apns=${this.summarizeToken(params.apnsToken)} voip=${this.summarizeToken(params.voipToken)}`,
     );
     return this.dbService.upsertDevice({
       identity: params.identity,
@@ -279,6 +280,7 @@ export class AppService {
       env,
       apnsToken: params.apnsToken,
       voipToken: params.voipToken,
+      supportsCallKit: params.supportsCallKit,
     });
   }
 
@@ -381,14 +383,77 @@ export class AppService {
       callerIdentity: params.callerIdentity,
     };
 
-    const push = await this.sendUserPush({
+    // Get all devices for the callee to determine push type
+    const devices = await this.dbService.listAllDevicesByIdentity({
       identity: params.calleeIdentity,
-      type: 'voip',
-      payload,
     });
 
+    let voipSent = 0;
+    let voipFailed = 0;
+    let alertSent = 0;
+    let alertFailed = 0;
+    const invalidTokens: string[] = [];
+
+    // Separate devices into VoIP-capable and APNs-only
+    const voipTokens: { token: string; env: string }[] = [];
+    const apnsTokens: { token: string; env: string }[] = [];
+
+    for (const device of devices) {
+      if (device.supports_callkit && device.voip_token) {
+        // iPhone or Cellular iPad: use VoIP Push
+        voipTokens.push({ token: device.voip_token, env: device.env });
+      } else if (device.apns_token) {
+        // WiFi-only iPad or device without VoIP token: use APNs alert
+        apnsTokens.push({ token: device.apns_token, env: device.env });
+      }
+    }
+
+    // Send VoIP Push to CallKit-capable devices
+    if (voipTokens.length > 0) {
+      const voipResult = await this.pushService.sendPush({
+        tokens: voipTokens,
+        type: 'voip',
+        payload,
+      });
+      voipSent = voipResult.sent;
+      voipFailed = voipResult.failed;
+      invalidTokens.push(...voipResult.invalidTokens);
+      for (const token of voipResult.invalidTokens) {
+        await this.dbService.invalidateToken('voip', token);
+      }
+    }
+
+    // Send APNs alert to WiFi-only iPads
+    if (apnsTokens.length > 0) {
+      const callerDisplayName = params.callerName ?? params.callerIdentity;
+      const apnsResult = await this.pushService.sendPush({
+        tokens: apnsTokens,
+        type: 'alert',
+        title: '수신 전화',
+        body: `${callerDisplayName}님이 전화 중`,
+        payload,
+        category: 'INCOMING_CALL',
+        sound: 'ringtone.caf',
+        interruptionLevel: 'time-sensitive',
+      });
+      alertSent = apnsResult.sent;
+      alertFailed = apnsResult.failed;
+      invalidTokens.push(...apnsResult.invalidTokens);
+      for (const token of apnsResult.invalidTokens) {
+        await this.dbService.invalidateToken('apns', token);
+      }
+    }
+
+    const push = {
+      sent: voipSent + alertSent,
+      failed: voipFailed + alertFailed,
+      invalidTokens,
+      voip: { sent: voipSent, failed: voipFailed },
+      alert: { sent: alertSent, failed: alertFailed },
+    };
+
     this.logger.log(
-      `inviteCall sent caller=${params.callerIdentity} callee=${params.calleeIdentity} room=${roomName} callId=${call.call_id} pushSent=${push.sent} pushFailed=${push.failed}`,
+      `inviteCall sent caller=${params.callerIdentity} callee=${params.calleeIdentity} room=${roomName} callId=${call.call_id} voipSent=${voipSent} voipFailed=${voipFailed} alertSent=${alertSent} alertFailed=${alertFailed}`,
     );
     return {
       callId: call.call_id,
