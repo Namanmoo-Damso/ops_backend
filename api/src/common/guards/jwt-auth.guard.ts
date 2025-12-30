@@ -4,7 +4,7 @@ import {
   ExecutionContext,
   UnauthorizedException,
 } from '@nestjs/common';
-import { AuthService } from '../../auth.service';
+import { AuthService } from '../../auth/auth.service';
 
 /**
  * 일반 사용자 JWT 인증 Guard

@@ -7,12 +7,16 @@ import { NotificationScheduler } from './notification.scheduler';
 import { AiService } from './ai.service';
 import { CommonModule } from './common/common.module';
 import { DatabaseModule } from './database/database.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     CommonModule,
     DatabaseModule,
+    AuthModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [
