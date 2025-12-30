@@ -8,9 +8,7 @@ import { WardsManagementController } from './wards-management/wards-management.c
 import { LocationsController } from './locations/locations.controller';
 import { EmergenciesController } from './emergencies/emergencies.controller';
 import { AppService } from '../app.service';
-import { AuthService } from '../auth/auth.service';
-import { DbService } from '../db.service';
-import { PushService } from '../push.service';
+import { AuthService } from '../auth';
 
 @Module({
   imports: [
@@ -29,8 +27,6 @@ import { PushService } from '../push.service';
     AdminAuthService,
     AppService,
     AuthService,
-    DbService,
-    PushService,
   ],
   exports: [AdminAuthService],
 })

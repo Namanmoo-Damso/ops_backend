@@ -13,8 +13,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { parse } from 'csv-parse/sync';
 import { AppService } from '../../app.service';
-import { AuthService } from '../../auth/auth.service';
-import { DbService } from '../../db.service';
+import { AuthService } from '../../auth';
+import { DbService } from '../../database';
 
 @Controller('v1/admin')
 export class WardsManagementController {

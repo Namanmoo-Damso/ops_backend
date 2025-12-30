@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
-import { DbService } from './db.service';
+import { DbService } from '../database';
 
 type CallAnalysisResult = {
   summary: string;

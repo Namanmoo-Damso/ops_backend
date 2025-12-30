@@ -7,11 +7,11 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppService } from './app.service';
-import { DbService } from './db.service';
-import { PushService } from './push.service';
-import { AuthService } from './auth.service';
-import { AiService } from './ai.service';
-import { NotificationScheduler } from './notification.scheduler';
+import { DbService } from './database';
+import { PushService } from './push';
+import { AuthService } from './auth';
+import { AiService } from './ai';
+import { NotificationScheduler } from './scheduler';
 
 // ============================================================================
 // Mock 설정

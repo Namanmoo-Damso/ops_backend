@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { DbService } from './db.service';
-import { AppService } from './app.service';
+import { DbService } from '../database';
+import { AppService } from '../app.service';
 
 @Injectable()
 export class NotificationScheduler {

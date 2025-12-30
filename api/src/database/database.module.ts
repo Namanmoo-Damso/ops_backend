@@ -1,5 +1,5 @@
 import { Module, Global } from '@nestjs/common';
-import { DbService } from '../db.service';
+import { DbService } from './db.service';
 
 /**
  * 데이터베이스 모듈
