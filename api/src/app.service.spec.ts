@@ -117,7 +117,6 @@ const mockPushService = {
 
 const mockAuthService = {
   verifyAccessToken: jest.fn(),
-  verifyTempToken: jest.fn(),
   kakaoLogin: jest.fn(),
   refreshTokens: jest.fn(),
   registerGuardian: jest.fn(),
@@ -259,10 +258,10 @@ describe('Issue #4: 보호자 회원가입 API', () => {
     expect(mockAuthService.registerGuardian).toBeDefined();
   });
 
-  it('임시 토큰 + 어르신 정보로 가입해야 함', async () => {
+  it('Access Token + 어르신 정보로 가입 완료해야 함', async () => {
     mockAuthService.registerGuardian.mockResolvedValue({
-      accessToken: 'access_token',
-      refreshToken: 'refresh_token',
+      accessToken: 'new_access_token',
+      refreshToken: 'new_refresh_token',
       user: { id: 'user-1', userType: 'guardian' },
       guardianInfo: {
         id: 'guardian-1',
@@ -272,7 +271,7 @@ describe('Issue #4: 보호자 회원가입 API', () => {
     });
 
     const result = await mockAuthService.registerGuardian({
-      tempToken: 'temp_token',
+      accessToken: 'access_token', // 카카오 로그인 시 발급받은 액세스 토큰
       wardEmail: 'ward@email.com',
       wardPhoneNumber: '010-1234-5678',
     });
