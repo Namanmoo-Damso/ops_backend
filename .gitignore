@@ -40,5 +40,6 @@ DerivedData/
 *.bak/
 
 # Local files (not tracked)
+CLAUDE.md
 REVIEW_REPORT.md
 mock_*.csv
