@@ -2,8 +2,8 @@
 
 > AI 모델이 백엔드 프로젝트 컨텍스트를 이해하고, 코드 품질을 일관되게 유지하기 위한 **프로젝트 헌법(Constitution)**
 
-**버전:** 1.0.0
-**최종 수정:** 2025년 12월 29일
+**버전:** 2.0.0
+**최종 수정:** 2025년 12월 30일
 **문서 상태:** 활성
 
 ---
@@ -17,7 +17,7 @@ LiveKit 기반 실시간 통화 관제 플랫폼으로, NestJS API 서버와 Nex
 </description>
 
 <tech_stack>
-<!-- 2025.12.29 기준 실제 버전 -->
+<!-- 2025.12.30 기준 실제 버전 -->
 - **Runtime**: Node.js 20+ (LTS)
 - **API Framework**: NestJS 11.x (TypeScript)
 - **Web Framework**: Next.js 16.x (React 19, App Router)
@@ -201,52 +201,152 @@ db: 데이터베이스 스키마/마이그레이션 변경
 ---
 
 <file_structure>
-<!-- 프로젝트 구조 -->
+<!-- 프로젝트 구조 (v2.0.0 - 모듈 기반 아키텍처) -->
 
 ```
 ops_backend/
-├── api/                          # NestJS API 서버
+├── api/                              # NestJS API 서버
 │   ├── src/
-│   │   ├── main.ts               # 엔트리포인트
-│   │   ├── app.module.ts         # 루트 모듈
-│   │   ├── app.controller.ts     # API 엔드포인트
-│   │   ├── app.service.ts        # 비즈니스 로직 ⭐
-│   │   ├── db.service.ts         # 데이터베이스 ⭐
-│   │   ├── push.service.ts       # APNs 푸시 ⭐
+│   │   ├── main.ts                   # 엔트리포인트
+│   │   ├── app.module.ts             # 루트 모듈
+│   │   ├── app.controller.ts         # 헬스체크, 웹훅 (최소화)
+│   │   ├── app.service.ts            # 공용 비즈니스 로직
+│   │   ├── db.service.ts             # 데이터베이스 ⭐
+│   │   ├── push.service.ts           # APNs 푸시 ⭐
+│   │   ├── ai.service.ts             # AI 분석 서비스
+│   │   ├── notification.scheduler.ts # 알림 스케줄러
+│   │   │
+│   │   ├── common/                   # 공용 모듈 (@Global)
+│   │   │   ├── common.module.ts
+│   │   │   ├── guards/
+│   │   │   │   ├── jwt-auth.guard.ts     # JWT 인증 가드
+│   │   │   │   └── admin-auth.guard.ts   # 관제 인증 가드
+│   │   │   ├── filters/
+│   │   │   │   └── http-exception.filter.ts
+│   │   │   └── decorators/
+│   │   │       └── current-user.decorator.ts
+│   │   │
+│   │   ├── database/                 # 데이터베이스 모듈 (@Global)
+│   │   │   └── database.module.ts
+│   │   │
+│   │   ├── auth/                     # 인증 모듈 ⭐
+│   │   │   ├── auth.module.ts
+│   │   │   ├── auth.controller.ts    # /auth/*
+│   │   │   ├── auth.service.ts
+│   │   │   └── dto/
+│   │   │       ├── kakao-login.dto.ts
+│   │   │       ├── refresh-token.dto.ts
+│   │   │       └── anonymous-auth.dto.ts
+│   │   │
+│   │   ├── users/                    # 사용자 모듈 ⭐
+│   │   │   ├── users.module.ts
+│   │   │   ├── users.controller.ts   # /users/*
+│   │   │   ├── users.service.ts
+│   │   │   └── dto/
+│   │   │       ├── register-guardian.dto.ts
+│   │   │       └── user-response.dto.ts
+│   │   │
+│   │   ├── guardians/                # 보호자 모듈 ⭐
+│   │   │   ├── guardians.module.ts
+│   │   │   ├── guardians.controller.ts # /guardians/*
+│   │   │   └── guardians.service.ts
+│   │   │
+│   │   ├── wards/                    # 피보호자 모듈 ⭐
+│   │   │   ├── wards.module.ts
+│   │   │   ├── wards.controller.ts   # /wards/*
+│   │   │   └── wards.service.ts
+│   │   │
+│   │   ├── calls/                    # 통화 모듈 ⭐
+│   │   │   ├── calls.module.ts
+│   │   │   └── calls.controller.ts   # /calls/*
+│   │   │
+│   │   ├── rtc/                      # RTC 토큰 모듈
+│   │   │   ├── rtc.module.ts
+│   │   │   └── rtc.controller.ts     # /rtc-token
+│   │   │
+│   │   ├── devices/                  # 디바이스 모듈
+│   │   │   ├── devices.module.ts
+│   │   │   └── devices.controller.ts # /register-device
+│   │   │
+│   │   ├── push/                     # 푸시 모듈
+│   │   │   ├── push.module.ts
+│   │   │   └── push.controller.ts    # /push/*
+│   │   │
+│   │   ├── admin/                    # 관제 관리자 모듈 ⭐
+│   │   │   ├── admin.module.ts
+│   │   │   ├── auth/
+│   │   │   │   ├── admin-auth.controller.ts # /admin/auth/*
+│   │   │   │   └── admin-auth.service.ts
+│   │   │   ├── dashboard/
+│   │   │   │   └── dashboard.controller.ts  # /admin/dashboard/*
+│   │   │   ├── wards-management/
+│   │   │   │   └── wards-management.controller.ts # /admin/wards/*
+│   │   │   ├── locations/
+│   │   │   │   └── locations.controller.ts  # /admin/locations/*
+│   │   │   └── emergencies/
+│   │   │       └── emergencies.controller.ts # /admin/emergencies/*
+│   │   │
 │   │   └── types/
-│   │       └── apn.d.ts          # APNs 타입 정의
+│   │       └── apn.d.ts              # APNs 타입 정의
+│   │
 │   ├── test/
-│   │   └── app.e2e-spec.ts       # E2E 테스트
+│   │   └── app.e2e-spec.ts           # E2E 테스트
 │   └── package.json
 │
-├── web/                          # Next.js 관제 웹
+├── web/                              # Next.js 관제 웹
 │   ├── app/
-│   │   ├── layout.tsx            # 루트 레이아웃
-│   │   └── page.tsx              # 메인 페이지 ⭐
+│   │   ├── layout.tsx                # 루트 레이아웃
+│   │   ├── page.tsx                  # 화상통화 페이지 ⭐
+│   │   ├── page.module.css           # 스타일
+│   │   ├── dashboard/page.tsx        # 대시보드
+│   │   ├── my-wards/page.tsx         # 피보호자 관리
+│   │   ├── locations/page.tsx        # 위치 정보
+│   │   ├── emergencies/page.tsx      # 비상 연락
+│   │   ├── select-organization/page.tsx # 기관 선택
+│   │   └── wards/bulk-upload/page.tsx   # CSV 업로드
+│   │
+│   ├── components/                   # React 컴포넌트 ⭐
+│   │   ├── Icons.tsx                 # SVG 아이콘
+│   │   ├── AuthGuard.tsx             # 인증 가드
+│   │   ├── SidebarLayout.tsx         # 사이드바 레이아웃
+│   │   ├── DashboardCharts.tsx       # 대시보드 차트
+│   │   ├── LocationMap.tsx           # 위치 지도
+│   │   └── video/                    # 화상통화 컴포넌트
+│   │       ├── VideoTiles.tsx        # 비디오 타일
+│   │       ├── JoinBanner.tsx        # 참가 배너
+│   │       ├── ControlBar.tsx        # 컨트롤 바
+│   │       ├── ParticipantSidebar.tsx # 참가자 사이드바
+│   │       └── index.ts              # barrel export
+│   │
+│   ├── hooks/                        # React 훅 ⭐
+│   │   ├── useLiveKitSession.ts      # LiveKit 세션 관리
+│   │   ├── useSessionMonitor.ts      # 세션 모니터링
+│   │   └── index.ts                  # barrel export
+│   │
 │   └── package.json
 │
 ├── db/
-│   └── init.sql                  # DB 초기화 스크립트 ⭐
+│   └── init.sql                      # DB 초기화 스크립트 ⭐
 │
 ├── scripts/
-│   ├── gen_livekit_keys.sh       # LiveKit 키 생성
-│   └── start-work.sh             # 이슈 작업 시작 스크립트
+│   ├── gen_livekit_keys.sh           # LiveKit 키 생성
+│   └── start-work.sh                 # 이슈 작업 시작 스크립트
 │
 ├── .claude/
-│   ├── settings.local.json       # Claude Code 설정
-│   └── skills/                   # 워크플로우 스킬 ⭐
-│       ├── smart-commit.md       # 스마트 커밋
-│       ├── start-work.md         # 작업 시작
-│       ├── code-review.md        # 코드 리뷰
-│       └── sync-docs.md          # 문서 동기화
+│   ├── settings.local.json           # Claude Code 설정
+│   └── skills/                       # 워크플로우 스킬 ⭐
+│       ├── smart-commit.md           # 스마트 커밋
+│       ├── start-work.md             # 작업 시작
+│       ├── code-review.md            # 코드 리뷰
+│       └── sync-docs.md              # 문서 동기화
 │
-├── docker-compose.yml            # 컨테이너 구성
-├── Caddyfile                     # 리버스 프록시
-├── livekit.yaml                  # LiveKit 설정
-├── api.env                       # API 환경변수
-├── db.env                        # DB 환경변수
-├── web.env                       # Web 환경변수
-└── CLAUDE.md                     # 이 문서
+├── docker-compose.yml                # 컨테이너 구성
+├── Caddyfile                         # 리버스 프록시
+├── livekit.yaml                      # LiveKit 설정
+├── api.env                           # API 환경변수
+├── db.env                            # DB 환경변수
+├── web.env                           # Web 환경변수
+└── CLAUDE.md                         # 이 문서
 ```
 </file_structure>
 
@@ -298,33 +398,98 @@ ops_backend/
 ---
 
 <api_endpoints>
-<!-- 현재 구현된 API 엔드포인트 -->
+<!-- 현재 구현된 API 엔드포인트 (v2.0.0 - 모듈 기반) -->
 
-### 인증 및 토큰
+### 시스템
+| Method | Path | 설명 | 모듈 |
+|--------|------|------|------|
+| GET | `/healthz` | 헬스 체크 | app |
+| POST | `/webhook/kakao/unlink` | 카카오 연결 해제 웹훅 | app |
+
+### 인증 (auth/)
 | Method | Path | 설명 |
 |--------|------|------|
-| POST | `/rtc-token` | LiveKit RTC 토큰 발급 |
-| POST | `/register-device` | APNs 디바이스 등록 |
+| POST | `/auth/kakao` | 카카오 로그인 |
+| POST | `/auth/refresh` | JWT 토큰 갱신 |
+| POST | `/auth/anonymous` | 익명 인증 |
 
-### 통화
+### 사용자 (users/)
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/users/me` | 내 정보 조회 |
+| POST | `/users/register/guardian` | 보호자 회원가입 |
+
+### 보호자 (guardians/)
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/guardians/dashboard` | 보호자 대시보드 |
+| GET | `/guardians/reports` | 분석 보고서 |
+| GET | `/guardians/wards` | 피보호자 목록 |
+
+### 피보호자 (wards/)
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/wards/:id` | 피보호자 상세 |
+| PUT | `/wards/:id/settings` | 피보호자 설정 변경 |
+
+### 통화 (calls/)
 | Method | Path | 설명 |
 |--------|------|------|
 | POST | `/calls/invite` | 통화 초대 (푸시 발송) |
 | POST | `/calls/:id/answer` | 통화 응답 |
 | POST | `/calls/:id/end` | 통화 종료 |
+| GET | `/rooms/:name/members` | 방 참여자 목록 |
 
-### 관리
+### RTC (rtc/)
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/rooms/:name/members` | 방 참여자 목록 |
+| POST | `/rtc-token` | LiveKit RTC 토큰 발급 |
+
+### 디바이스 (devices/)
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/register-device` | APNs 디바이스 등록 |
+
+### 푸시 (push/)
+| Method | Path | 설명 |
+|--------|------|------|
 | POST | `/push/broadcast` | 브로드캐스트 푸시 |
 
-<!-- 확장 예정 (이슈 기반) -->
-### 예정된 API (이슈 참고)
-- `POST /auth/kakao` - 카카오 로그인 (#2)
-- `POST /auth/refresh` - 토큰 갱신 (#3)
-- `POST /users/register/guardian` - 보호자 가입 (#4)
-- `GET /users/me` - 내 정보 (#6)
+### 관제 인증 (admin/auth/)
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/admin/auth/oauth/:provider` | OAuth 로그인 (kakao/google) |
+| POST | `/admin/auth/refresh` | 관제 토큰 갱신 |
+| POST | `/admin/auth/logout` | 로그아웃 |
+| GET | `/admin/auth/organizations` | 기관 목록 |
+| GET | `/admin/auth/me` | 관리자 정보 |
+
+### 관제 대시보드 (admin/dashboard/)
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/admin/dashboard/stats` | 통계 데이터 |
+| GET | `/admin/dashboard/realtime` | 실시간 데이터 |
+
+### 관제 피보호자 관리 (admin/wards/)
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/admin/wards/bulk-upload` | CSV 일괄 등록 |
+| GET | `/admin/my-wards` | 피보호자 목록 |
+
+### 관제 위치 (admin/locations/)
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/admin/locations` | 위치 목록 |
+| GET | `/admin/locations/history` | 위치 이력 |
+| GET | `/admin/locations/status` | 실시간 상태 |
+
+### 관제 비상 (admin/emergencies/)
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/admin/emergency` | 비상 연락 발송 |
+| GET | `/admin/emergencies` | 비상 목록 |
+| GET | `/admin/emergencies/:id` | 비상 상세 |
+| POST | `/admin/emergencies/:id/resolve` | 비상 해결 |
 </api_endpoints>
 
 ---
@@ -474,4 +639,11 @@ ops_backend/
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|-----------|
+| 2.0.0 | 2025.12.30 | 모듈 기반 아키텍처 리팩토링 완료 |
+| | | - API: auth/, users/, guardians/, wards/, calls/, rtc/, devices/, push/, admin/ 모듈 분리 |
+| | | - API: common/ 모듈 (guards, filters, decorators) 추가 |
+| | | - API: app.controller.ts 최소화 (healthz, webhook만 유지) |
+| | | - Web: components/ 폴더 구조화 (Icons, video/) |
+| | | - Web: hooks/ 폴더 추가 (useLiveKitSession, useSessionMonitor) |
+| | | - Web: page.tsx 48% 감소 (1,219줄 → 636줄) |
 | 1.0.0 | 2025.12.29 | 최초 작성 - ops_backend 프로젝트 전용 (NestJS/Next.js) |
