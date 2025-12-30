@@ -75,7 +75,11 @@ export default function MyWardsPage() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          setError("로그인이 만료되었습니다");
+          // 토큰 만료 - 자동 로그아웃
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("admin_info");
+          window.location.href = "/login";
           return;
         }
         throw new Error(`HTTP ${response.status}`);

@@ -2,105 +2,10 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  height: calc(100vh - 80px);
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: var(--bg);
-}
-
-.gridHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
-  background: white;
-  border-bottom: 1px solid #e2e8f0;
-  border-radius: 12px 12px 0 0;
-  flex-shrink: 0;
-}
-
-.gridInfo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.gridLabel {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
-}
-
-.gridValue {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1e293b;
-  padding: 6px 14px;
-  background: #f1f5f9;
-  border-radius: 8px;
-}
-
-.gridControl {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.gridBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  background: white;
-  color: #1e293b;
-  font-size: 18px;
-  font-weight: 600;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  transition: all 150ms ease;
-}
-
-.gridBtn:hover:not(:disabled) {
-  background: #f1f5f9;
-  border-color: #3b82f6;
-  color: #3b82f6;
-}
-
-.gridBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.gridSlider {
-  width: 120px;
-  height: 6px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: #e2e8f0;
-  border-radius: 4px;
-  outline: none;
-}
-
-.gridSlider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #3b82f6;
-  cursor: pointer;
-  border: 3px solid white;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
-}
-
-.gridSlider::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #3b82f6;
-  cursor: pointer;
-  border: 3px solid white;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
 }
 
 .roomWrap {
@@ -123,6 +28,10 @@
   grid-template-columns: minmax(0, 1fr) 320px;
   min-height: 0;
   height: 100%;
+}
+
+.contentFullWidth {
+  grid-template-columns: 1fr;
 }
 
 .stage {
@@ -621,7 +530,7 @@
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   flex-shrink: 0;
   position: fixed;
-  left: calc(240px + 50%);
+  left: 50%;
   transform: translateX(-50%);
   bottom: calc(20px + env(safe-area-inset-bottom));
   z-index: 10;
@@ -720,6 +629,51 @@
   cursor: not-allowed;
 }
 
+.gridSpinner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: #f1f5f9;
+  border-radius: 10px;
+}
+
+.gridSpinnerBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: white;
+  display: grid;
+  place-items: center;
+  color: #475569;
+  cursor: pointer;
+  transition: all 150ms ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.gridSpinnerBtn:hover:not(:disabled) {
+  background: #3b82f6;
+  color: white;
+}
+
+.gridSpinnerBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.gridSpinnerValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  min-width: 60px;
+  justify-content: center;
+}
+
 .joinBanner {
   position: absolute;
   top: 16px;
@@ -773,6 +727,10 @@
     grid-template-columns: 1fr;
   }
 
+  .contentFullWidth {
+    grid-template-columns: 1fr;
+  }
+
   .sidebar {
     border-left: none;
     border-top: 1px solid #e2e8f0;
@@ -785,23 +743,7 @@
 
 @media (max-width: 768px) {
   .page {
-    height: calc(100vh - 60px);
-  }
-
-  .gridHeader {
-    padding: 12px 16px;
-    flex-direction: column;
-    gap: 12px;
-    align-items: flex-start;
-  }
-
-  .gridControl {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .gridSlider {
-    flex: 1;
+    height: 100%;
   }
 
   .stage {
