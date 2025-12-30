@@ -1,6 +1,6 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
-import { AuthService } from '../../auth/auth.service';
-import { DbService } from '../../db.service';
+import { AuthService } from '../../auth';
+import { DbService } from '../../database';
 
 @Injectable()
 export class AdminAuthService {

@@ -10,7 +10,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { AuthService } from '../auth/auth.service';
+import { AuthService } from '../auth';
 import { RegisterGuardianDto } from './dto';
 
 @Controller('v1/users')

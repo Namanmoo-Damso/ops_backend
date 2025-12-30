@@ -1,7 +1,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
-import { DbService } from '../db.service';
+import { DbService } from '../database';
 
 type UserType = 'guardian' | 'ward';
 

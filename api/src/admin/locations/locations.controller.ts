@@ -11,7 +11,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AppService } from '../../app.service';
-import { DbService } from '../../db.service';
+import { DbService } from '../../database';
 
 @Controller('v1/admin/locations')
 export class LocationsController {

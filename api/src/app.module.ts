@@ -2,26 +2,29 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { PushService } from './push.service';
-import { NotificationScheduler } from './notification.scheduler';
-import { AiService } from './ai.service';
-import { CommonModule } from './common/common.module';
-import { DatabaseModule } from './database/database.module';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { GuardiansModule } from './guardians/guardians.module';
-import { WardsModule } from './wards/wards.module';
-import { CallsModule } from './calls/calls.module';
-import { RtcModule } from './rtc/rtc.module';
-import { DevicesModule } from './devices/devices.module';
-import { PushModule } from './push/push.module';
-import { AdminModule } from './admin/admin.module';
+import { CommonModule } from './common';
+import { DatabaseModule } from './database';
+import { AuthModule } from './auth';
+import { UsersModule } from './users';
+import { GuardiansModule } from './guardians';
+import { WardsModule } from './wards';
+import { CallsModule } from './calls';
+import { RtcModule } from './rtc';
+import { DevicesModule } from './devices';
+import { PushModule } from './push';
+import { AdminModule } from './admin';
+import { AiModule } from './ai';
+import { SchedulerModule } from './scheduler';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    // 전역 모듈 (순서 중요)
     CommonModule,
     DatabaseModule,
+    PushModule,
+    AiModule,
+    // 기능 모듈
     AuthModule,
     UsersModule,
     GuardiansModule,
@@ -29,15 +32,10 @@ import { AdminModule } from './admin/admin.module';
     CallsModule,
     RtcModule,
     DevicesModule,
-    PushModule,
     AdminModule,
+    SchedulerModule,
   ],
   controllers: [AppController],
-  providers: [
-    AppService,
-    PushService,
-    NotificationScheduler,
-    AiService,
-  ],
+  providers: [AppService],
 })
 export class AppModule {}

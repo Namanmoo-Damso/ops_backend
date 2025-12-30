@@ -1,13 +1,10 @@
 import { Module } from '@nestjs/common';
 import { CallsController } from './calls.controller';
 import { AppService } from '../app.service';
-import { AiService } from '../ai.service';
-import { NotificationScheduler } from '../notification.scheduler';
-import { DbService } from '../db.service';
-import { PushService } from '../push.service';
+import { NotificationScheduler } from '../scheduler';
 
 @Module({
   controllers: [CallsController],
-  providers: [AppService, AiService, NotificationScheduler, DbService, PushService],
+  providers: [AppService, NotificationScheduler],
 })
 export class CallsModule {}

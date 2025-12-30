@@ -13,7 +13,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { GuardiansService } from './guardians.service';
-import { AuthService } from '../auth/auth.service';
+import { AuthService } from '../auth';
 
 @Controller('v1/guardian')
 export class GuardiansController {

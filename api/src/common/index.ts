@@ -1,3 +1,6 @@
+// Module
+export { CommonModule } from './common.module';
+
 // Decorators
 export { CurrentUser, CurrentAdmin } from './decorators/current-user.decorator';
 export type {
