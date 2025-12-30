@@ -15,6 +15,7 @@ import { CallsModule } from './calls/calls.module';
 import { RtcModule } from './rtc/rtc.module';
 import { DevicesModule } from './devices/devices.module';
 import { PushModule } from './push/push.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { PushModule } from './push/push.module';
     RtcModule,
     DevicesModule,
     PushModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [
