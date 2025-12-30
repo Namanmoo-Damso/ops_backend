@@ -9,8 +9,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AppService } from '../app.service';
-import { AiService } from '../ai.service';
-import { NotificationScheduler } from '../notification.scheduler';
+import { AiService } from '../ai';
+import { NotificationScheduler } from '../scheduler';
 
 @Controller('v1/calls')
 export class CallsController {

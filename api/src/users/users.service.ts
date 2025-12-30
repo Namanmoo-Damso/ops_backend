@@ -1,5 +1,5 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { DbService } from '../db.service';
+import { DbService } from '../database';
 
 @Injectable()
 export class UsersService {

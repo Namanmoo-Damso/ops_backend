@@ -5,7 +5,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { DbService } from '../../db.service';
+import { DbService } from '../../database';
 
 @Controller('v1/admin/dashboard')
 export class DashboardController {

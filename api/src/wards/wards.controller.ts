@@ -9,7 +9,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { WardsService } from './wards.service';
-import { AuthService } from '../auth/auth.service';
+import { AuthService } from '../auth';
 
 @Controller('v1/ward')
 export class WardsController {

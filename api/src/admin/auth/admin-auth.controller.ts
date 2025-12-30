@@ -10,8 +10,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AdminAuthService } from './admin-auth.service';
-import { AuthService } from '../../auth/auth.service';
-import { DbService } from '../../db.service';
+import { AuthService } from '../../auth';
+import { DbService } from '../../database';
 
 @Controller('admin')
 export class AdminAuthController {

@@ -6,7 +6,7 @@ import {
   Post,
   Logger,
 } from '@nestjs/common';
-import { DbService } from './db.service';
+import { DbService } from './database';
 
 @Controller()
 export class AppController {

@@ -2,8 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AccessToken, type AccessTokenOptions } from 'livekit-server-sdk';
 import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { DbService } from './db.service';
-import { PushService } from './push.service';
+import { DbService } from './database';
+import { PushService } from './push';
 
 type Role = 'host' | 'viewer' | 'observer';
 type PushType = 'alert' | 'voip';

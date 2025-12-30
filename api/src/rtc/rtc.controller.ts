@@ -10,8 +10,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AppService } from '../app.service';
-import { AuthService } from '../auth/auth.service';
-import { DbService } from '../db.service';
+import { AuthService } from '../auth';
+import { DbService } from '../database';
 
 @Controller()
 export class RtcController {

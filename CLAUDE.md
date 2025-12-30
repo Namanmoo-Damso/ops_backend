@@ -201,7 +201,7 @@ db: 데이터베이스 스키마/마이그레이션 변경
 ---
 
 <file_structure>
-<!-- 프로젝트 구조 (v2.0.0 - 모듈 기반 아키텍처) -->
+<!-- 프로젝트 구조 (v2.1.0 - 완전한 모듈 기반 아키텍처) -->
 
 ```
 ops_backend/
@@ -211,13 +211,10 @@ ops_backend/
 │   │   ├── app.module.ts             # 루트 모듈
 │   │   ├── app.controller.ts         # 헬스체크, 웹훅 (최소화)
 │   │   ├── app.service.ts            # 공용 비즈니스 로직
-│   │   ├── db.service.ts             # 데이터베이스 ⭐
-│   │   ├── push.service.ts           # APNs 푸시 ⭐
-│   │   ├── ai.service.ts             # AI 분석 서비스
-│   │   ├── notification.scheduler.ts # 알림 스케줄러
 │   │   │
 │   │   ├── common/                   # 공용 모듈 (@Global)
 │   │   │   ├── common.module.ts
+│   │   │   ├── index.ts              # 배럴 export
 │   │   │   ├── guards/
 │   │   │   │   ├── jwt-auth.guard.ts     # JWT 인증 가드
 │   │   │   │   └── admin-auth.guard.ts   # 관제 인증 가드
@@ -226,8 +223,26 @@ ops_backend/
 │   │   │   └── decorators/
 │   │   │       └── current-user.decorator.ts
 │   │   │
-│   │   ├── database/                 # 데이터베이스 모듈 (@Global)
-│   │   │   └── database.module.ts
+│   │   ├── database/                 # 데이터베이스 모듈 (@Global) ⭐
+│   │   │   ├── database.module.ts
+│   │   │   ├── db.service.ts         # 데이터베이스 서비스
+│   │   │   └── index.ts
+│   │   │
+│   │   ├── push/                     # 푸시 모듈 (@Global) ⭐
+│   │   │   ├── push.module.ts
+│   │   │   ├── push.service.ts       # APNs 푸시 서비스
+│   │   │   ├── push.controller.ts    # /push/*
+│   │   │   └── index.ts
+│   │   │
+│   │   ├── ai/                       # AI 모듈 (@Global) ⭐
+│   │   │   ├── ai.module.ts
+│   │   │   ├── ai.service.ts         # OpenAI 분석 서비스
+│   │   │   └── index.ts
+│   │   │
+│   │   ├── scheduler/                # 스케줄러 모듈 ⭐
+│   │   │   ├── scheduler.module.ts
+│   │   │   ├── notification.scheduler.ts # 알림 스케줄러
+│   │   │   └── index.ts
 │   │   │
 │   │   ├── auth/                     # 인증 모듈 ⭐
 │   │   │   ├── auth.module.ts
@@ -639,6 +654,12 @@ ops_backend/
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|-----------|
+| 2.1.0 | 2025.12.30 | 서비스 파일 모듈화 완료 |
+| | | - API: db.service.ts → database/ 모듈로 이동 |
+| | | - API: push.service.ts → push/ 모듈로 이동 (@Global) |
+| | | - API: ai.service.ts → ai/ 모듈로 분리 (@Global) |
+| | | - API: notification.scheduler.ts → scheduler/ 모듈로 분리 |
+| | | - API: 모든 import 경로 배럴 export 방식으로 통일 |
 | 2.0.0 | 2025.12.30 | 모듈 기반 아키텍처 리팩토링 완료 |
 | | | - API: auth/, users/, guardians/, wards/, calls/, rtc/, devices/, push/, admin/ 모듈 분리 |
 | | | - API: common/ 모듈 (guards, filters, decorators) 추가 |
