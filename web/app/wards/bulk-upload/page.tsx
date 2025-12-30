@@ -110,12 +110,37 @@ export default function BulkUploadPage() {
   const handleUpload = async () => {
     if (!file) return;
 
+    // Get admin info from localStorage
+    const accessToken = localStorage.getItem("admin_access_token");
+    const adminInfoStr = localStorage.getItem("admin_info");
+
+    if (!accessToken) {
+      setError("로그인이 필요합니다.");
+      return;
+    }
+
+    let organizationId: string | null = null;
+    if (adminInfoStr) {
+      try {
+        const adminInfo = JSON.parse(adminInfoStr);
+        organizationId = adminInfo.organizationId;
+      } catch {
+        // ignore parse error
+      }
+    }
+
+    if (!organizationId) {
+      setError("조직 정보가 없습니다. 조직을 먼저 선택해주세요.");
+      return;
+    }
+
     setStage("uploading");
     setUploadProgress(10);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("organizationId", organizationId);
 
       // 진행률 시뮬레이션
       const progressInterval = setInterval(() => {
@@ -124,6 +149,9 @@ export default function BulkUploadPage() {
 
       const response = await fetch(`${API_BASE}/v1/admin/wards/bulk-upload`, {
         method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+        },
         body: formData,
       });
 
@@ -131,6 +159,13 @@ export default function BulkUploadPage() {
       setUploadProgress(100);
 
       if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("admin_info");
+          window.location.href = "/login";
+          return;
+        }
         const data = await response.json();
         throw new Error(data.message || `HTTP ${response.status}`);
       }
