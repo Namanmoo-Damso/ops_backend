@@ -416,6 +416,13 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     return result.rows[0];
   }
 
+  async updateUserType(userId: string, userType: 'guardian' | 'ward') {
+    await this.pool.query(
+      `update users set user_type = $1, updated_at = now() where id = $2`,
+      [userType, userId],
+    );
+  }
+
   async findGuardianByWardEmail(wardEmail: string) {
     const result = await this.pool.query<GuardianRow>(
       `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
@@ -432,7 +439,7 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     email: string | null;
     nickname: string | null;
     profileImageUrl: string | null;
-    userType: 'guardian' | 'ward';
+    userType: 'guardian' | 'ward' | null;
   }) {
     const identity = `kakao_${params.kakaoId}`;
     const result = await this.pool.query<UserRow>(

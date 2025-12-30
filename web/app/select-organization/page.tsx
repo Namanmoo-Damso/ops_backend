@@ -61,6 +61,13 @@ export default function SelectOrganizationPage() {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("admin_info");
+          window.location.href = "/login";
+          return;
+        }
         const data = await response.json();
         throw new Error(data.message || "조직 생성에 실패했습니다.");
       }
@@ -78,6 +85,13 @@ export default function SelectOrganizationPage() {
       });
 
       if (!updateResponse.ok) {
+        if (updateResponse.status === 401) {
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("admin_info");
+          window.location.href = "/login";
+          return;
+        }
         const data = await updateResponse.json();
         throw new Error(data.message || "조직 선택에 실패했습니다.");
       }

@@ -51,11 +51,27 @@ export default function EmergenciesPage() {
 
   const fetchEmergencies = useCallback(async () => {
     try {
+      const token = localStorage.getItem("admin_access_token");
+      if (!token) {
+        window.location.href = "/login";
+        return;
+      }
       const url = filterStatus
         ? `${API_BASE}/v1/admin/emergencies?status=${filterStatus}`
         : `${API_BASE}/v1/admin/emergencies`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("admin_info");
+          window.location.href = "/login";
+          return;
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
       const data = await response.json();
       setEmergencies(data.emergencies || []);
       setError(null);
@@ -84,16 +100,33 @@ export default function EmergenciesPage() {
     setIsResolving(true);
 
     try {
+      const token = localStorage.getItem("admin_access_token");
+      if (!token) {
+        window.location.href = "/login";
+        return;
+      }
       const response = await fetch(
         `${API_BASE}/v1/admin/emergencies/${emergencyId}/resolve`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ status }),
         }
       );
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("admin_info");
+          window.location.href = "/login";
+          return;
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
       await fetchEmergencies();
       setSelectedEmergencyId(null);
     } catch (err) {

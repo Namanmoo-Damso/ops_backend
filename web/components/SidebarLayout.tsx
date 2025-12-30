@@ -1,9 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { ReactNode, useState } from "react";
 import AuthGuard from "./AuthGuard";
+import { useSessionMonitor } from "../hooks/useSessionMonitor";
+
+const IconMenu = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+    <path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+  </svg>
+);
+
+const IconClose = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+    <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+  </svg>
+);
 
 const IconMonitor = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
@@ -70,78 +83,133 @@ const navItems = [
 type SidebarLayoutProps = {
   children: ReactNode;
   title?: string;
+  noPadding?: boolean;
 };
 
-export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
+export default function SidebarLayout({ children, title, noPadding }: SidebarLayoutProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const handleLogout = () => {
-    localStorage.removeItem("admin_access_token");
-    localStorage.removeItem("admin_refresh_token");
-    localStorage.removeItem("admin_info");
-    window.location.href = "/login";
-  };
+  // 세션 모니터링 (토큰 만료 시점에 정확히 발동, 5분 전 경고)
+  const { handleLogout } = useSessionMonitor({
+    warningBeforeExpiryMs: 5 * 60 * 1000,
+  });
 
   return (
     <AuthGuard>
-      <div
+      {/* Toggle Button (when collapsed) */}
+      {sidebarCollapsed && (
+        <button
+          onClick={() => {
+            console.log("[DEBUG] Menu button clicked - opening sidebar");
+            setSidebarCollapsed(false);
+          }}
+          style={{
+            position: "fixed",
+            top: "16px",
+            left: "8px",
+            width: "44px",
+            height: "44px",
+            borderRadius: "12px",
+            border: "1px solid #e2e8f0",
+            background: "white",
+            display: "grid",
+            placeItems: "center",
+            color: "#475569",
+            cursor: "pointer",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+            zIndex: 9999,
+          }}
+        >
+          <IconMenu />
+        </button>
+      )}
+
+      {/* Sidebar */}
+      <aside
         style={{
-          display: "flex",
-          minHeight: "100vh",
-          backgroundColor: "#f8fafc",
-        }}
-      >
-        {/* Fixed Sidebar */}
-        <aside
-        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          bottom: 0,
           width: "240px",
           backgroundColor: "#ffffff",
           borderRight: "1px solid #e2e8f0",
           display: "flex",
           flexDirection: "column",
-          position: "fixed",
-          top: 0,
-          left: 0,
-          bottom: 0,
-          zIndex: 50,
+          transform: sidebarCollapsed ? "translateX(-240px)" : "translateX(0)",
+          transition: "transform 200ms ease",
+          zIndex: 9999,
         }}
       >
-        {/* Logo */}
-        <div
-          style={{
-            padding: "20px 16px",
-            borderBottom: "1px solid #e2e8f0",
-          }}
-        >
-          <Link
-            href="/"
+          {/* Logo */}
+          <div
             style={{
+              padding: "20px 16px",
+              borderBottom: "1px solid #e2e8f0",
               display: "flex",
               alignItems: "center",
-              gap: "12px",
-              textDecoration: "none",
+              justifyContent: "space-between",
             }}
           >
-            <div
+            <Link
+              href="/"
               style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "10px",
-                background: "conic-gradient(from 120deg, #3b82f6, #1e40af, #22c55e, #3b82f6)",
-                boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.12)",
-              }}
-            />
-            <span
-              style={{
-                fontSize: "18px",
-                fontWeight: 700,
-                color: "#1e293b",
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                textDecoration: "none",
               }}
             >
-              담소 관제센터
-            </span>
-          </Link>
-        </div>
+              <div
+                style={{
+                  width: "36px",
+                  height: "36px",
+                  borderRadius: "10px",
+                  background: "conic-gradient(from 120deg, #3b82f6, #1e40af, #22c55e, #3b82f6)",
+                  boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.12)",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: "18px",
+                  fontWeight: 700,
+                  color: "#1e293b",
+                }}
+              >
+                담소 관제센터
+              </span>
+            </Link>
+            <button
+              onClick={() => {
+                console.log("[DEBUG] Close button clicked - collapsing sidebar");
+                setSidebarCollapsed(true);
+              }}
+              style={{
+                width: "32px",
+                height: "32px",
+                borderRadius: "8px",
+                border: "none",
+                background: "transparent",
+                display: "grid",
+                placeItems: "center",
+                color: "#94a3b8",
+                cursor: "pointer",
+                transition: "all 150ms ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#f1f5f9";
+                e.currentTarget.style.color = "#64748b";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+                e.currentTarget.style.color = "#94a3b8";
+              }}
+            >
+              <IconClose />
+            </button>
+          </div>
 
         {/* Navigation */}
         <nav
@@ -157,21 +225,29 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
             const isActive = pathname === item.href;
             const Icon = item.icon;
             return (
-              <Link
+              <button
                 key={item.href}
-                href={item.href}
+                type="button"
+                onClick={() => {
+                  console.log("[DEBUG] Nav button clicked, navigating to:", item.href);
+                  window.location.href = item.href;
+                }}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "12px",
                   padding: "12px 14px",
                   borderRadius: "10px",
+                  border: "none",
                   textDecoration: "none",
                   fontSize: "14px",
                   fontWeight: isActive ? 600 : 500,
                   color: isActive ? "#3b82f6" : "#475569",
                   backgroundColor: isActive ? "rgba(59, 130, 246, 0.08)" : "transparent",
                   transition: "all 150ms ease",
+                  cursor: "pointer",
+                  width: "100%",
+                  textAlign: "left",
                 }}
                 onMouseEnter={(e) => {
                   if (!isActive) {
@@ -188,7 +264,7 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
               >
                 <Icon />
                 <span>{item.label}</span>
-              </Link>
+              </button>
             );
           })}
         </nav>
@@ -236,8 +312,12 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
       <main
         style={{
           flex: 1,
-          marginLeft: "240px",
+          marginLeft: sidebarCollapsed ? 0 : "240px",
           minHeight: "100vh",
+          height: noPadding ? "100vh" : undefined,
+          display: noPadding ? "flex" : undefined,
+          flexDirection: noPadding ? "column" : undefined,
+          transition: "margin-left 200ms ease",
         }}
       >
         {/* Header */}
@@ -266,9 +346,8 @@ export default function SidebarLayout({ children, title }: SidebarLayoutProps) {
         )}
 
         {/* Page Content */}
-        <div style={{ padding: "24px 28px" }}>{children}</div>
+        <div style={noPadding ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : { padding: "24px 28px" }}>{children}</div>
       </main>
-      </div>
     </AuthGuard>
   );
 }
