@@ -31,4 +31,14 @@ DerivedData/
 
 # Logs
 *.log
+
+# Claude Code
 .claude/
+
+# Backup files
+*.bak
+*.bak/
+
+# Local files (not tracked)
+REVIEW_REPORT.md
+mock_*.csv
