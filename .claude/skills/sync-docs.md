@@ -54,7 +54,7 @@ cat docker-compose.yml
 - [ ] `<tech_stack>` - 실제 package.json 버전과 일치?
 - [ ] `<core_entities>` - db/init.sql 테이블과 일치?
 - [ ] `<file_structure>` - 실제 디렉토리 구조와 일치?
-- [ ] `<api_endpoints>` - app.controller.ts 엔드포인트와 일치?
+- [ ] `<api_endpoints>` - 모듈별 컨트롤러 엔드포인트와 일치?
 - [ ] `<github_issues>` - 현재 이슈 목록과 일치?
 
 ### README.md 검증 (있는 경우)
@@ -104,8 +104,11 @@ gh issue list --state open --json number,title --limit 30
 
 ### api_endpoints 업데이트
 ```bash
-# Controller에서 엔드포인트 추출
-grep -E "@(Get|Post|Put|Delete|Patch)" api/src/app.controller.ts
+# 모듈별 Controller에서 엔드포인트 추출
+find api/src -name "*.controller.ts" -exec grep -l "@(Get|Post|Put|Delete|Patch)" {} \;
+
+# 각 모듈별 엔드포인트 확인
+grep -rE "@(Get|Post|Put|Delete|Patch)" api/src/*/
 ```
 
 ---
@@ -150,8 +153,11 @@ git diff CLAUDE.md
 ### 구조 정보
 | 소스 | 문서 위치 |
 |------|-----------|
-| api/src/*.ts | CLAUDE.md file_structure |
+| api/src/*/ (모듈 디렉토리) | CLAUDE.md file_structure |
+| api/src/*/*.controller.ts | CLAUDE.md api_endpoints |
 | web/app/*.tsx | CLAUDE.md file_structure |
+| web/components/*.tsx | CLAUDE.md file_structure |
+| web/hooks/*.ts | CLAUDE.md file_structure |
 | db/init.sql | CLAUDE.md core_entities |
 
 ### 이슈 정보
