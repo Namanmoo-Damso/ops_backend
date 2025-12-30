@@ -9,6 +9,9 @@ import { CommonModule } from './common/common.module';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { GuardiansModule } from './guardians/guardians.module';
+import { WardsModule } from './wards/wards.module';
+import { CallsModule } from './calls/calls.module';
 
 @Module({
   imports: [
@@ -17,6 +20,9 @@ import { UsersModule } from './users/users.module';
     DatabaseModule,
     AuthModule,
     UsersModule,
+    GuardiansModule,
+    WardsModule,
+    CallsModule,
   ],
   controllers: [AppController],
   providers: [
