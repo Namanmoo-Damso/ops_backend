@@ -15,8 +15,22 @@ export default function LocationsPage() {
 
   const fetchLocations = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/v1/admin/locations`);
+      const token = localStorage.getItem("admin_access_token");
+      if (!token) {
+        window.location.href = "/login";
+        return;
+      }
+      const response = await fetch(`${API_BASE}/v1/admin/locations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("admin_info");
+          window.location.href = "/login";
+          return;
+        }
         throw new Error(`HTTP ${response.status}`);
       }
       const data = await response.json();
