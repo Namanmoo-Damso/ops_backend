@@ -164,14 +164,14 @@ export class AppController {
       wardPhoneNumber?: string;
     },
   ) {
-    // Authorization header에서 temp token 추출
+    // Authorization header에서 access token 추출
     const authHeader = authorization ?? '';
-    const tempToken = authHeader.startsWith('Bearer ')
+    const accessToken = authHeader.startsWith('Bearer ')
       ? authHeader.slice('Bearer '.length).trim()
       : undefined;
 
-    if (!tempToken) {
-      throw new HttpException('Temp token is required', HttpStatus.UNAUTHORIZED);
+    if (!accessToken) {
+      throw new HttpException('Access token is required', HttpStatus.UNAUTHORIZED);
     }
 
     const wardEmail = body.wardEmail?.trim();
@@ -197,7 +197,7 @@ export class AppController {
     try {
       this.logger.log(`registerGuardian wardEmail=${wardEmail}`);
       const result = await this.authService.registerGuardian({
-        tempToken,
+        accessToken,
         wardEmail,
         wardPhoneNumber,
       });
@@ -856,14 +856,26 @@ export class AppController {
 
     let authIdentity: string | undefined;
     let authName: string | undefined;
+
     if (bearer) {
-      try {
-        const payload = this.appService.verifyApiToken(bearer);
-        authIdentity = payload.identity;
-        authName = payload.displayName;
-      } catch (error) {
-        if (config.authRequired) {
-          throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+      // 1. 카카오 JWT 검증 시도
+      const kakaoPayload = this.authService.verifyAccessToken(bearer);
+      if (kakaoPayload) {
+        const user = await this.dbService.findUserById(kakaoPayload.sub);
+        if (user) {
+          authIdentity = user.identity;
+          authName = user.nickname ?? user.display_name ?? undefined;
+        }
+      } else {
+        // 2. 익명 토큰 검증 시도
+        try {
+          const payload = this.appService.verifyApiToken(bearer);
+          authIdentity = payload.identity;
+          authName = payload.displayName;
+        } catch (error) {
+          if (config.authRequired) {
+            throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+          }
         }
       }
     } else if (config.authRequired) {
@@ -880,7 +892,8 @@ export class AppController {
       throw new HttpException('identity is required', HttpStatus.BAD_REQUEST);
     }
 
-    const name = (body.name ?? authName ?? identity).trim();
+    // 카카오 nickname 우선, 없으면 body.name, 그래도 없으면 identity
+    const name = (authName ?? body.name ?? identity).trim();
     const role = body.role ?? 'viewer';
 
     if (!['host', 'viewer', 'observer'].includes(role)) {

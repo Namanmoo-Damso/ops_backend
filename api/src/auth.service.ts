@@ -40,12 +40,15 @@ type KakaoLoginResult =
       user: UserInfo;
     }
   | {
+      // 보호자 신규 가입 - 추가 정보 필요
       isNewUser: true;
       requiresRegistration: true;
-      kakaoProfile: KakaoProfile;
-      tempToken: string;
+      accessToken: string;
+      refreshToken: string;
+      user: UserInfo;
     }
   | {
+      // 어르신 신규 가입 - 자동 매칭 시도
       isNewUser: true;
       requiresRegistration: false;
       accessToken: string;
@@ -123,13 +126,29 @@ export class AuthService {
       // 어르신 - 자동 매칭 시도
       return this.handleWardRegistration(kakaoProfile);
     } else {
-      // 보호자 - 추가 정보 필요
-      const tempToken = this.issueTempToken(kakaoProfile.kakaoId);
+      // 보호자 - 사용자 먼저 생성 (user_type은 null로, 추가 정보 입력 후 guardian으로 변경)
+      const user = await this.dbService.createUserWithKakao({
+        kakaoId: kakaoProfile.kakaoId,
+        email: kakaoProfile.email,
+        nickname: kakaoProfile.nickname,
+        profileImageUrl: kakaoProfile.profileImageUrl,
+        userType: null, // 추가 정보 입력 전까지 null
+      });
+
+      const tokens = await this.issueTokens(user.id, null);
+      this.logger.log(`kakaoLogin new guardian (pending) userId=${user.id}`);
+
       return {
         isNewUser: true,
         requiresRegistration: true,
-        kakaoProfile,
-        tempToken,
+        ...tokens,
+        user: {
+          id: user.id,
+          email: user.email,
+          nickname: user.nickname,
+          profileImageUrl: user.profile_image_url,
+          userType: null,
+        },
       };
     }
   }
@@ -260,33 +279,11 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private issueTempToken(kakaoId: string): string {
-    const payload: TokenPayload = {
-      sub: kakaoId,
-      type: 'temp',
-      kakaoId,
-    };
-
-    return jwt.sign(payload, this.jwtSecret, {
-      expiresIn: 30 * 60, // 30 minutes
-    });
-  }
-
   verifyAccessToken(token: string): TokenPayload | null {
     try {
       const payload = jwt.verify(token, this.jwtSecret) as TokenPayload;
       if (payload.type !== 'access') return null;
       return payload;
-    } catch {
-      return null;
-    }
-  }
-
-  verifyTempToken(token: string): { kakaoId: string } | null {
-    try {
-      const payload = jwt.verify(token, this.jwtSecret) as TokenPayload;
-      if (payload.type !== 'temp' || !payload.kakaoId) return null;
-      return { kakaoId: payload.kakaoId };
     } catch {
       return null;
     }
@@ -328,34 +325,29 @@ export class AuthService {
   }
 
   async registerGuardian(params: {
-    tempToken: string;
+    accessToken: string;
     wardEmail: string;
     wardPhoneNumber: string;
   }): Promise<GuardianRegistrationResult> {
-    // 1. 임시 토큰 검증
-    const tempPayload = this.verifyTempToken(params.tempToken);
-    if (!tempPayload) {
-      throw new UnauthorizedException('Invalid or expired temp token');
+    // 1. Access Token 검증
+    const payload = this.verifyAccessToken(params.accessToken);
+    if (!payload) {
+      throw new UnauthorizedException('Invalid or expired access token');
     }
 
-    // 2. 카카오 ID로 기존 사용자 확인 (중복 방지)
-    const existingUser = await this.dbService.findUserByKakaoId(tempPayload.kakaoId);
-    if (existingUser) {
-      throw new UnauthorizedException('User already registered');
+    // 2. 사용자 조회
+    const user = await this.dbService.findUserById(payload.sub);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
     }
 
-    // 3. 카카오 프로필 다시 가져오기 (temp token에서는 kakaoId만 있음)
-    // 임시 토큰 발급 시점의 프로필 정보가 필요하므로 별도 저장 필요
-    // 현재는 간단히 kakaoId만 사용하여 처리
+    // 3. 이미 등록 완료된 사용자인지 확인
+    if (user.user_type === 'guardian') {
+      throw new UnauthorizedException('User already registered as guardian');
+    }
 
-    // 4. 사용자 생성
-    const user = await this.dbService.createUserWithKakao({
-      kakaoId: tempPayload.kakaoId,
-      email: null, // 카카오 프로필에서 가져와야 하지만 temp token에는 없음
-      nickname: null,
-      profileImageUrl: null,
-      userType: 'guardian',
-    });
+    // 4. user_type을 guardian으로 업데이트
+    await this.dbService.updateUserType(user.id, 'guardian');
 
     // 5. 보호자 정보 생성
     const guardian = await this.dbService.createGuardian({
@@ -364,7 +356,7 @@ export class AuthService {
       wardPhoneNumber: params.wardPhoneNumber,
     });
 
-    // 6. JWT 발급
+    // 6. 새 JWT 발급 (user_type이 변경되었으므로)
     const tokens = await this.issueTokens(user.id, 'guardian');
 
     this.logger.log(`registerGuardian userId=${user.id} guardianId=${guardian.id}`);
