@@ -1,7 +1,7 @@
 import { Module, Global } from '@nestjs/common';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
-import { AuthService } from '../auth.service';
+import { AuthService } from '../auth/auth.service';
 import { DbService } from '../db.service';
 
 /**
