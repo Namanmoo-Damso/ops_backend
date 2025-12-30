@@ -12,6 +12,9 @@ import { UsersModule } from './users/users.module';
 import { GuardiansModule } from './guardians/guardians.module';
 import { WardsModule } from './wards/wards.module';
 import { CallsModule } from './calls/calls.module';
+import { RtcModule } from './rtc/rtc.module';
+import { DevicesModule } from './devices/devices.module';
+import { PushModule } from './push/push.module';
 
 @Module({
   imports: [
@@ -23,6 +26,9 @@ import { CallsModule } from './calls/calls.module';
     GuardiansModule,
     WardsModule,
     CallsModule,
+    RtcModule,
+    DevicesModule,
+    PushModule,
   ],
   controllers: [AppController],
   providers: [
