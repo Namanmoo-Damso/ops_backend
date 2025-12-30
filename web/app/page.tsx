@@ -56,50 +56,6 @@ const getInitials = (name: string) => {
 
 const IDENTITY_STORAGE_KEY = "damso.identity";
 const NAME_STORAGE_KEY = "damso.name";
-const KOREAN_ADJECTIVES = [
-  "푸른",
-  "맑은",
-  "따뜻한",
-  "고요한",
-  "빛나는",
-  "잔잔한",
-  "달콤한",
-  "시원한",
-  "반짝이는",
-  "싱그러운",
-  "넓은",
-  "단단한",
-  "포근한",
-  "차분한",
-  "선명한",
-  "부드러운",
-  "은은한",
-  "향기로운",
-  "높은",
-  "깊은",
-];
-const KOREAN_NOUNS = [
-  "바다",
-  "고래",
-  "별",
-  "달",
-  "노을",
-  "숲",
-  "바람",
-  "강",
-  "파도",
-  "하늘",
-  "산",
-  "구름",
-  "달빛",
-  "봄비",
-  "모래",
-  "정원",
-  "호수",
-  "빛",
-  "새벽",
-  "낮별",
-];
 
 const generateIdentity = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -204,6 +160,27 @@ const IconApps = () => (
       stroke="currentColor"
       strokeWidth="1.6"
     />
+  </svg>
+);
+
+const IconGrid = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="3" width="7" height="7" stroke="currentColor" strokeWidth="1.6" />
+    <rect x="14" y="3" width="7" height="7" stroke="currentColor" strokeWidth="1.6" />
+    <rect x="3" y="14" width="7" height="7" stroke="currentColor" strokeWidth="1.6" />
+    <rect x="14" y="14" width="7" height="7" stroke="currentColor" strokeWidth="1.6" />
+  </svg>
+);
+
+const IconMinus = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+const IconPlus = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
   </svg>
 );
 
@@ -388,6 +365,9 @@ const RoomShell = ({
   apiBase,
   selfIdentity,
   gridSize,
+  onGridSizeChange,
+  showParticipantList,
+  onToggleParticipantList,
 }: {
   focusedId: string | null;
   onFocus: (id: string | null) => void;
@@ -404,6 +384,9 @@ const RoomShell = ({
   apiBase: string;
   selfIdentity: string;
   gridSize: number;
+  onGridSizeChange: (size: number) => void;
+  showParticipantList: boolean;
+  onToggleParticipantList: () => void;
 }) => {
   const tracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: true }],
@@ -424,9 +407,6 @@ const RoomShell = ({
   const [ending, setEnding] = useState(false);
   const [knownParticipants, setKnownParticipants] = useState<
     Record<string, MockParticipant>
-  >({});
-  const [displayNameCache, setDisplayNameCache] = useState<
-    Record<string, string>
   >({});
   const [selectedParticipantId, setSelectedParticipantId] = useState<
     string | null
@@ -491,16 +471,6 @@ const RoomShell = ({
           : [];
         if (cancelled) return;
 
-        setDisplayNameCache((prev) => {
-          const next = { ...prev };
-          members.forEach((member) => {
-            const id = member.identity;
-            if (!id || next[id]) return;
-            next[id] = resolveRosterName(member);
-          });
-          return next;
-        });
-
         const now = new Date().toISOString();
         setKnownParticipants((prev) => {
           const next = { ...prev };
@@ -508,12 +478,7 @@ const RoomShell = ({
             const id = member.identity;
             if (!id) return;
             const existing = next[id];
-            const resolvedName = resolveRosterName(member);
-            const existingName = existing?.name;
-            const name =
-              existingName && !isGenericName(existingName)
-                ? existingName
-                : resolvedName;
+            const name = existing?.name || resolveRosterName(member);
             const online = existing?.online ?? false;
             next[id] = {
               id,
@@ -561,41 +526,8 @@ const RoomShell = ({
   const getBaseName = (participant: any) =>
     (participant.name || participant.identity || "User").trim();
 
-  const isGenericName = (name: string) => {
-    const normalized = name.toLowerCase();
-    return (
-      normalized === "ios user" ||
-      normalized === "ios" ||
-      normalized === "user" ||
-      normalized === "viewer" ||
-      normalized === "participant" ||
-      normalized === "unknown" ||
-      normalized.startsWith("ios-") ||
-      normalized.startsWith("host-")
-    );
-  };
-
-  const hashIdentity = (value: string) => {
-    let hash = 2166136261;
-    for (let i = 0; i < value.length; i += 1) {
-      hash ^= value.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
-    }
-    return Math.abs(hash);
-  };
-
-  const aliasFromIdentity = (identity: string) => {
-    const hash = hashIdentity(identity);
-    const adjective = KOREAN_ADJECTIVES[hash % KOREAN_ADJECTIVES.length];
-    const noun =
-      KOREAN_NOUNS[(hash >> 8) % KOREAN_NOUNS.length] ?? KOREAN_NOUNS[0];
-    const suffix = (hash % 90) + 10;
-    return `${adjective} ${noun} ${suffix}`;
-  };
-
   const resolveRosterName = (member: RosterMember) => {
-    const raw = (member.displayName || member.identity || "User").trim();
-    return isGenericName(raw) ? aliasFromIdentity(member.identity) : raw;
+    return (member.displayName || member.identity || "User").trim();
   };
 
   const isAudioOff = (participant: any) => {
@@ -775,52 +707,8 @@ const RoomShell = ({
     });
   }, [room, focusedId, remoteParticipantKey]);
 
-  const nameCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    tracks.forEach((trackRef: any) => {
-      const baseName = getBaseName(trackRef.participant);
-      counts.set(baseName, (counts.get(baseName) ?? 0) + 1);
-    });
-    return counts;
-  }, [tracks]);
-
-  const buildDisplayName = (participant: any) => {
-    const baseName = getBaseName(participant);
-    const id = getParticipantId(participant);
-    const count = nameCounts.get(baseName) ?? 0;
-    const needsAlias = count > 1 || isGenericName(baseName);
-    return needsAlias ? aliasFromIdentity(id) : baseName;
-  };
-
-  const participantLabelMap = useMemo(() => {
-    const map = { ...displayNameCache };
-    tracks.forEach((trackRef: any) => {
-      const participant = trackRef.participant;
-      const id = getParticipantId(participant);
-      if (!map[id]) {
-        map[id] = buildDisplayName(participant);
-      }
-    });
-    return map;
-  }, [tracks, displayNameCache, nameCounts]);
-
-  useEffect(() => {
-    const updates: Record<string, string> = {};
-    tracks.forEach((trackRef: any) => {
-      const participant = trackRef.participant;
-      const id = getParticipantId(participant);
-      if (!displayNameCache[id]) {
-        updates[id] = buildDisplayName(participant);
-      }
-    });
-    if (Object.keys(updates).length > 0) {
-      setDisplayNameCache((prev) => ({ ...prev, ...updates }));
-    }
-  }, [tracks, displayNameCache, nameCounts]);
-
   const resolveDisplayName = (participant: any) => {
-    const id = getParticipantId(participant);
-    return participantLabelMap[id] || getBaseName(participant);
+    return getBaseName(participant);
   };
 
   const participantKey = allParticipants
@@ -869,7 +757,6 @@ const RoomShell = ({
   }, [
     room,
     participantKey,
-    participantLabelMap,
     audioOverrides,
     videoOverrides,
     isMicrophoneEnabled,
@@ -939,7 +826,7 @@ const RoomShell = ({
   const isSelectedOnline = selectedParticipant?.online === true;
 
   return (
-    <div className={styles.content}>
+    <div className={`${styles.content} ${!showParticipantList ? styles.contentFullWidth : ""}`}>
       <div className={`${styles.stage} ${ending ? styles.stageEnding : ""}`}>
         {showJoin ? (
           <JoinBanner onJoin={onJoin} busy={joinBusy} error={error} />
@@ -1034,11 +921,36 @@ const RoomShell = ({
             <button className={styles.controlButton}>
               <IconChat />
             </button>
-            <button className={`${styles.controlButton} ${styles.active}`}>
+            <button
+              className={`${styles.controlButton} ${showParticipantList ? styles.active : ""}`}
+              onClick={onToggleParticipantList}
+            >
               <IconPeople />
             </button>
             <button className={styles.controlButton}>
               <IconApps />
+            </button>
+          </div>
+          <div className={styles.gridSpinner}>
+            <button
+              className={styles.gridSpinnerBtn}
+              onClick={() => onGridSizeChange(Math.max(3, gridSize - 1))}
+              disabled={gridSize <= 3}
+              type="button"
+            >
+              <IconMinus />
+            </button>
+            <div className={styles.gridSpinnerValue}>
+              <IconGrid />
+              <span>{gridSize}×{gridSize}</span>
+            </div>
+            <button
+              className={styles.gridSpinnerBtn}
+              onClick={() => onGridSizeChange(Math.min(7, gridSize + 1))}
+              disabled={gridSize >= 7}
+              type="button"
+            >
+              <IconPlus />
             </button>
           </div>
           <button
@@ -1051,76 +963,78 @@ const RoomShell = ({
         </div>
       </div>
 
-      <aside className={styles.sidebar}>
-        <div className={styles.sidebarHeader}>
-          <span>Participants ({sidebarList.length})</span>
-          <span className={styles.topIcon}>X</span>
-        </div>
-        <div className={styles.sidebarSearch}>
-          <input
-            className={styles.searchInput}
-            placeholder="Find participant"
-          />
-        </div>
-        <div className={styles.participantList}>
-          {sidebarList.map((participant) => (
-            <div
-              key={participant.id}
-              className={`${styles.participantRow} ${
-                participant.speaking ? styles.active : ""
-              } ${participant.online === false ? styles.offline : ""} ${
-                !participant.you ? styles.participantClickable : ""
-              } ${participant.id === selectedParticipantId ? styles.participantSelected : ""}`}
-              onClick={() => {
-                if (participant.you) return;
-                setSelectedParticipantId(participant.id);
-              }}
+      {showParticipantList && (
+        <aside className={styles.sidebar}>
+          <div className={styles.sidebarHeader}>
+            <span>Participants ({sidebarList.length})</span>
+            <span className={styles.topIcon} onClick={onToggleParticipantList}>X</span>
+          </div>
+          <div className={styles.sidebarSearch}>
+            <input
+              className={styles.searchInput}
+              placeholder="Find participant"
+            />
+          </div>
+          <div className={styles.participantList}>
+            {sidebarList.map((participant) => (
+              <div
+                key={participant.id}
+                className={`${styles.participantRow} ${
+                  participant.speaking ? styles.active : ""
+                } ${participant.online === false ? styles.offline : ""} ${
+                  !participant.you ? styles.participantClickable : ""
+                } ${participant.id === selectedParticipantId ? styles.participantSelected : ""}`}
+                onClick={() => {
+                  if (participant.you) return;
+                  setSelectedParticipantId(participant.id);
+                }}
+              >
+                <div className={styles.participantAvatar}>
+                  {participant.you ? "YOU" : getInitials(participant.name)}
+                </div>
+                <div className={styles.participantMeta}>
+                  <span className={styles.participantName}>
+                    {participant.name}
+                  </span>
+                  <span className={styles.participantStatus}>
+                    {participant.status || ""}
+                  </span>
+                </div>
+                <div className={styles.participantIcon}>
+                  <IconMic muted={participant.muted} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className={styles.sidebarFooter}>
+            <button
+              className={styles.footerButton}
+              onClick={toggleAllAudio}
+              disabled={!canControl}
+              type="button"
             >
-              <div className={styles.participantAvatar}>
-                {participant.you ? "YOU" : getInitials(participant.name)}
-              </div>
-              <div className={styles.participantMeta}>
-                <span className={styles.participantName}>
-                  {participant.name}
-                </span>
-                <span className={styles.participantStatus}>
-                  {participant.status || ""}
-                </span>
-              </div>
-              <div className={styles.participantIcon}>
-                <IconMic muted={participant.muted} />
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className={styles.sidebarFooter}>
-          <button
-            className={styles.footerButton}
-            onClick={toggleAllAudio}
-            disabled={!canControl}
-            type="button"
-          >
-            Mute All
-          </button>
-          <button
-            className={`${styles.footerButton} ${styles.primary}`}
-            onClick={() => {
-              console.log("Invite clicked", { selectedParticipantId, selectedParticipant, isSelectedOnline });
-              if (isSelectedOnline) {
-                console.log("Blocked: participant is online");
-                return;
-              }
-              onInvite(selectedParticipantId ?? "");
-            }}
-            disabled={!connected || inviteBusy || !selectedParticipantId || isSelectedOnline}
-          >
-            {isSelectedOnline ? "Already in room" : "Invite"}
-          </button>
-        </div>
-        {inviteStatus ? (
-          <div className={styles.sidebarStatus}>{inviteStatus}</div>
-        ) : null}
-      </aside>
+              Mute All
+            </button>
+            <button
+              className={`${styles.footerButton} ${styles.primary}`}
+              onClick={() => {
+                console.log("Invite clicked", { selectedParticipantId, selectedParticipant, isSelectedOnline });
+                if (isSelectedOnline) {
+                  console.log("Blocked: participant is online");
+                  return;
+                }
+                onInvite(selectedParticipantId ?? "");
+              }}
+              disabled={!connected || inviteBusy || !selectedParticipantId || isSelectedOnline}
+            >
+              {isSelectedOnline ? "Already in room" : "Invite"}
+            </button>
+          </div>
+          {inviteStatus ? (
+            <div className={styles.sidebarStatus}>{inviteStatus}</div>
+          ) : null}
+        </aside>
+      )}
     </div>
   );
 };
@@ -1143,6 +1057,7 @@ export default function Home() {
   const [inviteStatus, setInviteStatus] = useState<string | null>(null);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [gridSize, setGridSize] = useState(3);
+  const [showParticipantList, setShowParticipantList] = useState(true);
 
   useEffect(() => {
     if (apiBaseEnv) {
@@ -1265,42 +1180,8 @@ export default function Home() {
   };
 
   return (
-    <SidebarLayout>
+    <SidebarLayout noPadding>
       <div className={styles.page}>
-        {/* Grid Control Header */}
-        <div className={styles.gridHeader}>
-          <div className={styles.gridInfo}>
-            <span className={styles.gridLabel}>그리드 크기</span>
-            <span className={styles.gridValue}>{gridSize} x {gridSize}</span>
-          </div>
-          <div className={styles.gridControl}>
-            <button
-              className={styles.gridBtn}
-              onClick={() => setGridSize((prev) => Math.max(3, prev - 1))}
-              disabled={gridSize <= 3}
-              type="button"
-            >
-              −
-            </button>
-            <input
-              type="range"
-              min="3"
-              max="7"
-              value={gridSize}
-              onChange={(e) => setGridSize(Number(e.target.value))}
-              className={styles.gridSlider}
-            />
-            <button
-              className={styles.gridBtn}
-              onClick={() => setGridSize((prev) => Math.min(7, prev + 1))}
-              disabled={gridSize >= 7}
-              type="button"
-            >
-              +
-            </button>
-          </div>
-        </div>
-
         <div className={styles.roomWrap}>
           <LiveKitRoom
             className={styles.room}
@@ -1326,6 +1207,9 @@ export default function Home() {
               apiBase={apiBase || ""}
               selfIdentity={identity}
               gridSize={gridSize}
+              onGridSizeChange={setGridSize}
+              showParticipantList={showParticipantList}
+              onToggleParticipantList={() => setShowParticipantList((prev) => !prev)}
             />
           </LiveKitRoom>
         </div>
