@@ -168,6 +168,10 @@ export class GuardiansService {
       wardPhoneNumber,
     });
 
+    if (!updated) {
+      throw new HttpException('Failed to update ward registration', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
     return {
       id: updated.id,
       wardEmail: updated.ward_email,

@@ -3,7 +3,7 @@ import { AccessToken, type AccessTokenOptions } from 'livekit-server-sdk';
 import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { DbService } from './database';
-import { PushService } from './push';
+import { PushService } from './push/push.service';
 
 type Role = 'host' | 'viewer' | 'observer';
 type PushType = 'alert' | 'voip';
@@ -295,7 +295,13 @@ export class AppService {
   }) {
     const tokenType = params.type === 'voip' ? 'voip' : 'apns';
     const env = params.env ? this.normalizeEnv(params.env) : undefined;
-    const tokens = await this.dbService.listDevices({ tokenType, env });
+    const devices = await this.dbService.listDevices({ tokenType, env });
+    const tokens = devices
+      .map((d) => ({
+        token: (tokenType === 'voip' ? d.voip_token : d.apns_token) as string,
+        env: d.env,
+      }))
+      .filter((t) => t.token);
     const result = await this.pushService.sendPush({
       tokens,
       type: params.type,
@@ -322,11 +328,17 @@ export class AppService {
   }) {
     const tokenType = params.type === 'voip' ? 'voip' : 'apns';
     const env = params.env ? this.normalizeEnv(params.env) : undefined;
-    const tokens = await this.dbService.listDevicesByIdentity({
+    const devices = await this.dbService.listDevicesByIdentity({
       identity: params.identity,
       tokenType,
       env,
     });
+    const tokens = devices
+      .map((d) => ({
+        token: (tokenType === 'voip' ? d.voip_token : d.apns_token) as string,
+        env: d.env,
+      }))
+      .filter((t) => t.token);
     const result = await this.pushService.sendPush({
       tokens,
       type: params.type,

@@ -11,7 +11,7 @@ import { WardsModule } from './wards';
 import { CallsModule } from './calls';
 import { RtcModule } from './rtc';
 import { DevicesModule } from './devices';
-import { PushModule } from './push';
+import { PushModule, PushController } from './push';
 import { AdminModule } from './admin';
 import { AiModule } from './ai';
 import { SchedulerModule } from './scheduler';
@@ -35,7 +35,7 @@ import { SchedulerModule } from './scheduler';
     AdminModule,
     SchedulerModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, PushController],
   providers: [AppService],
 })
 export class AppModule {}
