@@ -145,6 +145,8 @@ $REVIEW_RESULT"
 - [ ] 에러 처리 적절함
 - [ ] DTO 타입 정의됨
 - [ ] 환경변수 하드코딩 없음
+- [ ] 모듈 분리 준수 (Controller → Service → Repository)
+- [ ] Guard/Decorator는 common/ 모듈에서 import
 
 ### Database
 - [ ] SQL Injection 방지 (파라미터 바인딩)
