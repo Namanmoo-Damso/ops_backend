@@ -7,7 +7,6 @@ import { DashboardController } from './dashboard/dashboard.controller';
 import { WardsManagementController } from './wards-management/wards-management.controller';
 import { LocationsController } from './locations/locations.controller';
 import { EmergenciesController } from './emergencies/emergencies.controller';
-import { AppService } from '../app.service';
 import { AuthService } from '../auth';
 import {
   DashboardRepository,
@@ -33,7 +32,6 @@ import {
   ],
   providers: [
     AdminAuthService,
-    AppService,
     AuthService,
     DashboardRepository,
     LocationRepository,

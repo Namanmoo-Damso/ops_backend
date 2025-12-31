@@ -11,7 +11,8 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../../app.service';
+import { AuthService } from '../../auth';
+import { PushService } from '../../push';
 import {
   EmergencyRepository,
   LocationRepository,
@@ -19,17 +20,33 @@ import {
   UserRepository,
 } from '../../database/repositories';
 
+const isAuthRequired = (): boolean => process.env.API_AUTH_REQUIRED === 'true';
+
 @Controller('v1/admin')
 export class EmergenciesController {
   private readonly logger = new Logger(EmergenciesController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly authService: AuthService,
+    private readonly pushService: PushService,
     private readonly emergencyRepository: EmergencyRepository,
     private readonly locationRepository: LocationRepository,
     private readonly wardRepository: WardRepository,
     private readonly userRepository: UserRepository,
   ) {}
+
+  private getAuthContext(authorization?: string): { identity?: string } | null {
+    if (!authorization) return null;
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length)
+      : '';
+    if (!token) return null;
+    try {
+      return this.authService.verifyApiToken(token);
+    } catch {
+      return null;
+    }
+  }
 
   @Post('emergency')
   async triggerEmergency(
@@ -40,9 +57,8 @@ export class EmergenciesController {
       message?: string;
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -105,7 +121,7 @@ export class EmergenciesController {
       const wardInfo = await this.wardRepository.getWithGuardianInfo(wardId);
       if (wardInfo?.guardian_identity) {
         try {
-          await this.appService.sendUserPush({
+          await this.pushService.sendUserPush({
             identity: wardInfo.guardian_identity,
             type: 'alert',
             title: '🚨 비상 알림',
@@ -145,9 +161,8 @@ export class EmergenciesController {
     @Query('wardId') wardId?: string,
     @Query('limit') limit?: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -202,9 +217,8 @@ export class EmergenciesController {
     @Headers('authorization') authorization: string | undefined,
     @Param('id') emergencyId: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -265,9 +279,8 @@ export class EmergenciesController {
       resolutionNote?: string;
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 

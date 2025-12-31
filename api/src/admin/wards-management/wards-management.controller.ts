@@ -12,20 +12,33 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { parse } from 'csv-parse/sync';
-import { AppService } from '../../app.service';
 import { AuthService } from '../../auth';
 import { WardRepository, AdminRepository } from '../../database/repositories';
+
+const isAuthRequired = (): boolean => process.env.API_AUTH_REQUIRED === 'true';
 
 @Controller('v1/admin')
 export class WardsManagementController {
   private readonly logger = new Logger(WardsManagementController.name);
 
   constructor(
-    private readonly appService: AppService,
     private readonly authService: AuthService,
     private readonly wardRepository: WardRepository,
     private readonly adminRepository: AdminRepository,
   ) {}
+
+  private getAuthContext(authorization?: string): { identity?: string } | null {
+    if (!authorization) return null;
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length)
+      : '';
+    if (!token) return null;
+    try {
+      return this.authService.verifyApiToken(token);
+    } catch {
+      return null;
+    }
+  }
 
   private isValidEmail(email: string): boolean {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -39,9 +52,8 @@ export class WardsManagementController {
     @UploadedFile() file: Express.Multer.File,
     @Body() body: { organizationId?: string },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 

@@ -10,27 +10,41 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../../app.service';
+import { AuthService } from '../../auth';
 import { LocationRepository, WardRepository } from '../../database/repositories';
+
+const isAuthRequired = (): boolean => process.env.API_AUTH_REQUIRED === 'true';
 
 @Controller('v1/admin/locations')
 export class LocationsController {
   private readonly logger = new Logger(LocationsController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly authService: AuthService,
     private readonly locationRepository: LocationRepository,
     private readonly wardRepository: WardRepository,
   ) {}
+
+  private getAuthContext(authorization?: string): { identity?: string } | null {
+    if (!authorization) return null;
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length)
+      : '';
+    if (!token) return null;
+    try {
+      return this.authService.verifyApiToken(token);
+    } catch {
+      return null;
+    }
+  }
 
   @Get()
   async getLocations(
     @Headers('authorization') authorization: string | undefined,
     @Query('organizationId') organizationId?: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -65,9 +79,8 @@ export class LocationsController {
     @Query('to') to?: string,
     @Query('limit') limit?: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -114,9 +127,8 @@ export class LocationsController {
     @Param('wardId') wardId: string,
     @Body() body: { status?: string },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
