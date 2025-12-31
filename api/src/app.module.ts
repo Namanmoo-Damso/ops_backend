@@ -16,6 +16,7 @@ import { AdminModule } from './admin';
 import { AiModule } from './ai';
 import { SchedulerModule } from './scheduler';
 import { PrismaModule } from './prisma';
+import { EventsModule } from './events';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { PrismaModule } from './prisma';
     PrismaModule,
     PushModule,
     AiModule,
+    EventsModule,
     // 기능 모듈
     AuthModule,
     UsersModule,

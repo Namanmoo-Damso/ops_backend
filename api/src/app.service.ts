@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AccessToken, type AccessTokenOptions } from 'livekit-server-sdk';
+import { AccessToken, type AccessTokenOptions, RoomServiceClient } from 'livekit-server-sdk';
 import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { DbService } from './database';
@@ -501,5 +501,40 @@ export class AppService {
     if (!token) return 'none';
     const suffix = token.slice(-6);
     return `len=${token.length}..${suffix}`;
+  }
+
+  /**
+   * LiveKit에서 특정 사용자를 모든 room에서 강제 퇴장
+   */
+  async removeParticipantFromAllRooms(identity: string): Promise<void> {
+    const config = getConfig();
+    const roomService = new RoomServiceClient(
+      config.livekitUrl,
+      config.livekitApiKey,
+      config.livekitApiSecret,
+    );
+
+    try {
+      // 활성 room 목록 조회
+      const rooms = await roomService.listRooms();
+
+      for (const room of rooms) {
+        try {
+          // 각 room에서 해당 participant 조회
+          const participants = await roomService.listParticipants(room.name);
+          const participant = participants.find((p) => p.identity === identity);
+
+          if (participant) {
+            await roomService.removeParticipant(room.name, identity);
+            this.logger.log(`removeParticipant room=${room.name} identity=${identity}`);
+          }
+        } catch (err) {
+          // participant가 없거나 이미 나간 경우 무시
+          this.logger.debug(`removeParticipant failed room=${room.name} identity=${identity} error=${(err as Error).message}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`removeParticipantFromAllRooms failed identity=${identity} error=${(err as Error).message}`);
+    }
   }
 }

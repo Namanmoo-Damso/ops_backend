@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { IconMic } from "../Icons";
 import { getInitials } from "./VideoTiles";
 import styles from "../../app/page.module.css";
@@ -39,6 +40,18 @@ export const ParticipantSidebar = ({
   connected,
   canControl,
 }: ParticipantSidebarProps) => {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredParticipants = useMemo(() => {
+    if (!searchQuery.trim()) return participants;
+    const query = searchQuery.toLowerCase();
+    return participants.filter(
+      (p) =>
+        p.name.toLowerCase().includes(query) ||
+        p.id.toLowerCase().includes(query)
+    );
+  }, [participants, searchQuery]);
+
   const selectedParticipant = selectedParticipantId
     ? participants.find((p) => p.id === selectedParticipantId)
     : null;
@@ -54,10 +67,12 @@ export const ParticipantSidebar = ({
         <input
           className={styles.searchInput}
           placeholder="Find participant"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
         />
       </div>
       <div className={styles.participantList}>
-        {participants.map((participant) => (
+        {filteredParticipants.map((participant) => (
           <div
             key={participant.id}
             className={`${styles.participantRow} ${

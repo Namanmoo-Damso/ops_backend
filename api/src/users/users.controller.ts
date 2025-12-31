@@ -11,6 +11,9 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { AuthService } from '../auth';
+import { AppService } from '../app.service';
+import { DbService } from '../database';
+import { EventsService } from '../events';
 import { RegisterGuardianDto } from './dto';
 
 @Controller('v1/users')
@@ -20,6 +23,9 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly authService: AuthService,
+    private readonly appService: AppService,
+    private readonly dbService: DbService,
+    private readonly eventsService: EventsService,
   ) {}
 
   private verifyAuthHeader(authorization: string | undefined) {
@@ -135,6 +141,23 @@ export class UsersController {
 
     try {
       this.logger.log(`deleteMe userId=${payload.sub}`);
+
+      // 1. Get user identity for LiveKit
+      const user = await this.dbService.findUserById(payload.sub);
+
+      // 2. LiveKit에서 강제 퇴장 (관제 페이지 목록에서 즉시 제거)
+      if (user?.identity) {
+        await this.appService.removeParticipantFromAllRooms(user.identity);
+
+        // SSE 이벤트 발행 (프론트엔드에서 목록 삭제)
+        this.eventsService.emit({
+          type: 'user-deleted',
+          identity: user.identity,
+          userId: payload.sub,
+        });
+      }
+
+      // 3. Delete user and all related data
       await this.usersService.deleteUser(payload.sub);
       return {
         success: true,

@@ -113,7 +113,8 @@ export class RtcController {
       throw new HttpException('roomName is required', HttpStatus.BAD_REQUEST);
     }
 
-    const identity = (body.identity ?? authIdentity)?.trim();
+    // 인증된 사용자가 있으면 항상 그 identity를 사용 (일관성 유지)
+    const identity = (authIdentity ?? body.identity)?.trim();
     if (!identity) {
       throw new HttpException('identity is required', HttpStatus.BAD_REQUEST);
     }

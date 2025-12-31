@@ -14,7 +14,8 @@ import {
   RefreshTokenDto,
   AnonymousAuthDto,
 } from './dto';
-import { DatabaseService } from '../database';
+import { DbService } from '../database';
+import { EventsService } from '../events';
 
 @Controller('v1/auth')
 export class AuthController {
@@ -23,7 +24,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly appService: AppService,
-    private readonly dbService: DatabaseService,
+    private readonly dbService: DbService,
+    private readonly eventsService: EventsService,
   ) {}
 
   @Post('kakao')
@@ -93,7 +95,7 @@ export class AuthController {
     @Headers('authorization') authorization: string | undefined,
   ) {
     const payload = this.authService.verifyAccessToken(
-      authorization?.replace(/^Bearer\s+/i, ''),
+      authorization?.replace(/^Bearer\s+/i, '') ?? '',
     );
     if (!payload) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
@@ -103,13 +105,29 @@ export class AuthController {
     this.logger.log(`logout userId=${userId}`);
 
     try {
-      // 1. Delete room members (모니터링 목록에서 제거)
+      // 0. Get user identity for LiveKit
+      const user = await this.dbService.findUserById(userId);
+      const identity = user?.identity;
+
+      // 1. LiveKit에서 강제 퇴장 (관제 페이지 목록에서 즉시 제거)
+      if (identity) {
+        await this.appService.removeParticipantFromAllRooms(identity);
+
+        // SSE 이벤트 발행 (프론트엔드에서 목록 삭제)
+        this.eventsService.emit({
+          type: 'user-logout',
+          identity,
+          userId,
+        });
+      }
+
+      // 2. Delete room members (모니터링 목록에서 제거)
       await this.dbService.deleteRoomMembersByUserId(userId);
 
-      // 2. Delete devices (푸시 토큰 제거)
+      // 3. Delete devices (푸시 토큰 제거)
       await this.dbService.deleteDevicesByUserId(userId);
 
-      // 3. Delete refresh tokens
+      // 4. Delete refresh tokens
       await this.dbService.deleteUserRefreshTokens(userId);
 
       return {

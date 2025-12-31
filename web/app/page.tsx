@@ -177,6 +177,7 @@ const RoomShell = ({
   const [ending, setEnding] = useState(false);
   const [knownParticipants, setKnownParticipants] = useState<Record<string, MockParticipant>>({});
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
+  const deletedIdentitiesRef = useRef<Set<string>>(new Set());
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -222,11 +223,17 @@ const RoomShell = ({
         if (cancelled) return;
 
         const now = new Date().toISOString();
+        console.log("[fetchRoster] Members from API:", members.map(m => m.identity));
         setKnownParticipants((prev) => {
           const next = { ...prev };
           members.forEach((member) => {
             const id = member.identity;
             if (!id) return;
+            // SSE로 삭제된 사용자는 다시 추가하지 않음
+            if (deletedIdentitiesRef.current.has(id)) {
+              console.log(`[fetchRoster] Skipping deleted identity: ${id}`);
+              return;
+            }
             const existing = next[id];
             const name = existing?.name || resolveRosterName(member);
             const online = existing?.online ?? false;
@@ -242,6 +249,7 @@ const RoomShell = ({
               lastSeen: existing?.lastSeen ?? member.joinedAt ?? now,
             };
           });
+          console.log("[fetchRoster] Updated knownParticipants:", Object.keys(next));
           return next;
         });
       } catch (err) {
@@ -416,6 +424,12 @@ const RoomShell = ({
       const identity = getParticipantId(participant);
       const displayName = getBaseName(participant);
 
+      // 사용자가 다시 로그인한 경우 (active track이 있음), deletedIdentities에서 제거
+      if (deletedIdentitiesRef.current.has(identity)) {
+        console.log(`[tracks] User logged back in, removing from deleted set: ${identity}`);
+        deletedIdentitiesRef.current.delete(identity);
+      }
+
       setKnownParticipants((prev) => {
         const existing = prev[identity];
         if (existing && existing.online) return prev;
@@ -494,6 +508,7 @@ const RoomShell = ({
   }, [visibleTiles, gridSize, showOnlyFocused]);
 
   const sidebarList = useMemo(() => {
+    console.log("[sidebarList] Computing, knownParticipants keys:", Object.keys(knownParticipants));
     const list = Object.values(knownParticipants).filter((participant) => {
       if (participant.you && participant.online === false) return false;
       return true;
@@ -503,6 +518,7 @@ const RoomShell = ({
       if (onlineDiff !== 0) return onlineDiff;
       return a.name.localeCompare(b.name);
     });
+    console.log("[sidebarList] Result count:", list.length, "names:", list.map(p => p.name));
     return list;
   }, [knownParticipants]);
 
@@ -511,6 +527,57 @@ const RoomShell = ({
     const selected = knownParticipants[selectedParticipantId];
     if (!selected || selected.you) setSelectedParticipantId(null);
   }, [knownParticipants, selectedParticipantId]);
+
+  // SSE 이벤트 구독 (로그아웃/회원탈퇴 시 목록에서 삭제)
+  useEffect(() => {
+    const base = apiBase || "";
+    if (!base) {
+      console.log("[SSE] apiBase is empty, skipping SSE connection");
+      return;
+    }
+
+    const sseUrl = `${base}/v1/events/stream`;
+    console.log(`[SSE] Connecting to: ${sseUrl}`);
+
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.onopen = () => {
+      console.log(`[SSE] Connection opened, readyState: ${eventSource.readyState}`);
+    };
+
+    eventSource.onmessage = (event) => {
+      console.log(`[SSE] Message received:`, event.data);
+      try {
+        const data = JSON.parse(event.data);
+        console.log(`[SSE] Parsed event:`, data);
+        if (data.type === "user-logout" || data.type === "user-deleted") {
+          const { identity } = data;
+          if (identity) {
+            console.log(`[SSE] Removing participant: ${identity}`);
+            // 삭제된 identity 기록 (재추가 방지)
+            deletedIdentitiesRef.current.add(identity);
+            setKnownParticipants((prev) => {
+              const next = { ...prev };
+              delete next[identity];
+              console.log(`[SSE] Updated participants:`, Object.keys(next));
+              return next;
+            });
+          }
+        }
+      } catch (err) {
+        console.error("[SSE] Parse error:", err);
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.error(`[SSE] Connection error, readyState: ${eventSource.readyState}`, err);
+    };
+
+    return () => {
+      console.log("[SSE] Closing connection");
+      eventSource.close();
+    };
+  }, [apiBase]);
 
   return (
     <div className={`${styles.content} ${!showParticipantList ? styles.contentFullWidth : ""}`}>
