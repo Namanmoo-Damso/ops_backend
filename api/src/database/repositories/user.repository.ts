@@ -81,7 +81,17 @@ export class UserRepository {
       where: { userId },
     });
 
-    // 2. Unlink wards from guardian (if user is a guardian)
+    // 2. Delete room members (모니터링 목록에서 제거)
+    await this.prisma.roomMember.deleteMany({
+      where: { userId },
+    });
+
+    // 3. Delete devices (푸시 토큰 제거)
+    await this.prisma.device.deleteMany({
+      where: { userId },
+    });
+
+    // 4. Unlink wards from guardian (if user is a guardian)
     const guardian = await findGuardianByUserId(userId);
     if (guardian) {
       await this.prisma.ward.updateMany({
@@ -93,12 +103,12 @@ export class UserRepository {
       });
     }
 
-    // 3. Delete ward record if user is a ward
+    // 5. Delete ward record if user is a ward
     await this.prisma.ward.deleteMany({
       where: { userId },
     });
 
-    // 4. Delete user
+    // 6. Delete user
     await this.prisma.user.delete({
       where: { id: userId },
     });

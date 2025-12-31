@@ -127,6 +127,10 @@ export class DbService implements OnModuleDestroy {
     return this.devices.invalidateToken(tokenType, token);
   }
 
+  async deleteDevicesByUserId(userId: string) {
+    return this.devices.deleteByUserId(userId);
+  }
+
   // ============================================================
   // Room methods
   // ============================================================
@@ -140,6 +144,10 @@ export class DbService implements OnModuleDestroy {
 
   async upsertRoomMember(params: { roomName: string; userId: string; role: string }) {
     return this.rooms.upsertMember(params);
+  }
+
+  async deleteRoomMembersByUserId(userId: string) {
+    return this.rooms.deleteMembersByUserId(userId);
   }
 
   // ============================================================

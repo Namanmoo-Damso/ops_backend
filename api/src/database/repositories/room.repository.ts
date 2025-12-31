@@ -75,4 +75,10 @@ export class RoomRepository {
 
     return { roomId: room.id };
   }
+
+  async deleteMembersByUserId(userId: string): Promise<void> {
+    await this.prisma.roomMember.deleteMany({
+      where: { userId },
+    });
+  }
 }

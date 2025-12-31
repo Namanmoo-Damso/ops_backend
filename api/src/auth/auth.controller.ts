@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Body,
+  Headers,
   HttpException,
   HttpStatus,
   Logger,
@@ -13,6 +14,7 @@ import {
   RefreshTokenDto,
   AnonymousAuthDto,
 } from './dto';
+import { DatabaseService } from '../database';
 
 @Controller('v1/auth')
 export class AuthController {
@@ -21,6 +23,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly appService: AppService,
+    private readonly dbService: DatabaseService,
   ) {}
 
   @Post('kakao')
@@ -83,5 +86,42 @@ export class AuthController {
     const identity = body.identity?.trim() || `user-${Date.now()}`;
     const displayName = body.displayName?.trim() || identity;
     return this.appService.issueApiToken(identity, displayName);
+  }
+
+  @Post('logout')
+  async logout(
+    @Headers('authorization') authorization: string | undefined,
+  ) {
+    const payload = this.authService.verifyAccessToken(
+      authorization?.replace(/^Bearer\s+/i, ''),
+    );
+    if (!payload) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    const userId = payload.sub;
+    this.logger.log(`logout userId=${userId}`);
+
+    try {
+      // 1. Delete room members (모니터링 목록에서 제거)
+      await this.dbService.deleteRoomMembersByUserId(userId);
+
+      // 2. Delete devices (푸시 토큰 제거)
+      await this.dbService.deleteDevicesByUserId(userId);
+
+      // 3. Delete refresh tokens
+      await this.dbService.deleteUserRefreshTokens(userId);
+
+      return {
+        success: true,
+        message: '로그아웃이 완료되었습니다.',
+      };
+    } catch (error) {
+      this.logger.error(`logout failed userId=${userId} error=${(error as Error).message}`);
+      throw new HttpException(
+        'Logout failed',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 }
