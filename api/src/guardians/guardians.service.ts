@@ -1,19 +1,19 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
-import { DbService } from '../database';
+import { GuardiansRepository } from './guardians.repository';
 
 @Injectable()
 export class GuardiansService {
   private readonly logger = new Logger(GuardiansService.name);
 
-  constructor(private readonly dbService: DbService) {}
+  constructor(private readonly guardiansRepository: GuardiansRepository) {}
 
   async verifyGuardianAccess(userId: string) {
-    const user = await this.dbService.findUserById(userId);
+    const user = await this.guardiansRepository.findUserById(userId);
     if (!user || user.user_type !== 'guardian') {
       throw new HttpException('Guardian access required', HttpStatus.FORBIDDEN);
     }
 
-    const guardian = await this.dbService.findGuardianByUserId(user.id);
+    const guardian = await this.guardiansRepository.findByUserId(user.id);
     if (!guardian) {
       throw new HttpException('Guardian info not found', HttpStatus.NOT_FOUND);
     }
@@ -23,7 +23,7 @@ export class GuardiansService {
 
   async getDashboard(userId: string) {
     const { guardian } = await this.verifyGuardianAccess(userId);
-    const linkedWard = await this.dbService.findWardByGuardianId(guardian.id);
+    const linkedWard = await this.guardiansRepository.findWardByGuardianId(guardian.id);
 
     if (!linkedWard) {
       return {
@@ -41,11 +41,11 @@ export class GuardiansService {
     this.logger.log(`getDashboard guardianId=${guardian.id} wardId=${linkedWard.id}`);
 
     const [stats, weeklyChange, moodStats, alerts, recentCalls] = await Promise.all([
-      this.dbService.getWardCallStats(linkedWard.id),
-      this.dbService.getWardWeeklyCallChange(linkedWard.id),
-      this.dbService.getWardMoodStats(linkedWard.id),
-      this.dbService.getHealthAlerts(guardian.id, 5),
-      this.dbService.getRecentCallSummaries(linkedWard.id, 5),
+      this.guardiansRepository.getWardCallStats(linkedWard.id),
+      this.guardiansRepository.getWardWeeklyCallChange(linkedWard.id),
+      this.guardiansRepository.getWardMoodStats(linkedWard.id),
+      this.guardiansRepository.getHealthAlerts(guardian.id, 5),
+      this.guardiansRepository.getRecentCallSummaries(linkedWard.id, 5),
     ]);
 
     return {
@@ -63,7 +63,7 @@ export class GuardiansService {
   async getReport(userId: string, period: 'week' | 'month') {
     const { guardian } = await this.verifyGuardianAccess(userId);
     const days = period === 'month' ? 30 : 7;
-    const linkedWard = await this.dbService.findWardByGuardianId(guardian.id);
+    const linkedWard = await this.guardiansRepository.findWardByGuardianId(guardian.id);
 
     if (!linkedWard) {
       return {
@@ -79,10 +79,10 @@ export class GuardiansService {
     this.logger.log(`getReport guardianId=${guardian.id} wardId=${linkedWard.id} period=${period}`);
 
     const [emotionTrend, healthKeywords, topTopics, summaries] = await Promise.all([
-      this.dbService.getEmotionTrend(linkedWard.id, days),
-      this.dbService.getHealthKeywordStats(linkedWard.id, days),
-      this.dbService.getTopTopics(linkedWard.id, days, 5),
-      this.dbService.getCallSummariesForReport(linkedWard.id, days),
+      this.guardiansRepository.getEmotionTrend(linkedWard.id, days),
+      this.guardiansRepository.getHealthKeywordStats(linkedWard.id, days),
+      this.guardiansRepository.getTopTopics(linkedWard.id, days, 5),
+      this.guardiansRepository.getCallSummariesForReport(linkedWard.id, days),
     ]);
 
     const summaryTexts = summaries
@@ -118,7 +118,7 @@ export class GuardiansService {
     const { guardian } = await this.verifyGuardianAccess(userId);
     this.logger.log(`getWards guardianId=${guardian.id}`);
 
-    const wards = await this.dbService.getGuardianWards(guardian.id);
+    const wards = await this.guardiansRepository.getWards(guardian.id);
 
     return {
       wards: wards.map((w) => ({
@@ -138,7 +138,7 @@ export class GuardiansService {
     const { guardian } = await this.verifyGuardianAccess(userId);
     this.logger.log(`addWard guardianId=${guardian.id} wardEmail=${wardEmail}`);
 
-    const registration = await this.dbService.createGuardianWardRegistration({
+    const registration = await this.guardiansRepository.createWardRegistration({
       guardianId: guardian.id,
       wardEmail,
       wardPhoneNumber,
@@ -155,13 +155,13 @@ export class GuardiansService {
   async updateWard(userId: string, wardId: string, wardEmail: string, wardPhoneNumber: string) {
     const { guardian } = await this.verifyGuardianAccess(userId);
 
-    const registration = await this.dbService.findGuardianWardRegistration(wardId, guardian.id);
+    const registration = await this.guardiansRepository.findWardRegistration(wardId, guardian.id);
     if (!registration) {
       throw new HttpException('Ward registration not found', HttpStatus.NOT_FOUND);
     }
 
     this.logger.log(`updateWard registrationId=${wardId}`);
-    const updated = await this.dbService.updateGuardianWardRegistration({
+    const updated = await this.guardiansRepository.updateWardRegistration({
       id: wardId,
       guardianId: guardian.id,
       wardEmail,
@@ -192,13 +192,13 @@ export class GuardiansService {
 
     // Primary ward인 경우 연결만 해제
     if (wardId === guardian.id) {
-      await this.dbService.unlinkPrimaryWard(guardian.id);
+      await this.guardiansRepository.unlinkPrimaryWard(guardian.id);
       return;
     }
 
-    // 추가 등록 삭제 (deleteGuardianWardRegistration 내부에서 ward 연결 해제 처리)
+    // 추가 등록 삭제 (deleteWardRegistration 내부에서 ward 연결 해제 처리)
     this.logger.log(`deleteWard registrationId=${wardId}`);
-    const deleted = await this.dbService.deleteGuardianWardRegistration(wardId, guardian.id);
+    const deleted = await this.guardiansRepository.deleteWardRegistration(wardId, guardian.id);
     if (!deleted) {
       throw new HttpException('Ward registration not found', HttpStatus.NOT_FOUND);
     }
@@ -208,7 +208,7 @@ export class GuardiansService {
     const { guardian } = await this.verifyGuardianAccess(userId);
     this.logger.log('getNotificationSettings guardianId=' + guardian.id);
 
-    const settings = await this.dbService.getNotificationSettings(userId);
+    const settings = await this.guardiansRepository.getNotificationSettings(userId);
 
     return {
       callReminder: settings?.call_reminder ?? true,
@@ -228,7 +228,7 @@ export class GuardiansService {
     const { guardian } = await this.verifyGuardianAccess(userId);
     this.logger.log('updateNotificationSettings guardianId=' + guardian.id);
 
-    const updated = await this.dbService.upsertNotificationSettings({
+    const updated = await this.guardiansRepository.upsertNotificationSettings({
       userId,
       callReminder: settings.callReminder,
       callComplete: settings.callComplete,
