@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthRepository } from './auth.repository';
-import { AppService } from '../app.service';
+import { RoomsService } from '../rooms';
 import {
   KakaoLoginDto,
   RefreshTokenDto,
@@ -24,7 +24,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly authRepository: AuthRepository,
-    private readonly appService: AppService,
+    private readonly roomsService: RoomsService,
     private readonly eventsService: EventsService,
   ) {}
 
@@ -87,7 +87,7 @@ export class AuthController {
   anonymousAuth(@Body() body: AnonymousAuthDto) {
     const identity = body.identity?.trim() || `user-${Date.now()}`;
     const displayName = body.displayName?.trim() || identity;
-    return this.appService.issueApiToken(identity, displayName);
+    return this.authService.issueApiToken(identity, displayName);
   }
 
   @Post('logout')
@@ -111,7 +111,7 @@ export class AuthController {
 
       // 1. LiveKit에서 강제 퇴장 (관제 페이지 목록에서 즉시 제거)
       if (identity) {
-        await this.appService.removeParticipantFromAllRooms(identity);
+        await this.roomsService.removeParticipantFromAllRooms(identity);
 
         // SSE 이벤트 발행 (프론트엔드에서 목록 삭제)
         this.eventsService.emit({
