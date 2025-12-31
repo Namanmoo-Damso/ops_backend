@@ -12,7 +12,6 @@ import {
 import { UsersService } from './users.service';
 import { AuthService } from '../auth';
 import { AppService } from '../app.service';
-import { DbService } from '../database';
 import { EventsService } from '../events';
 import { RegisterGuardianDto } from './dto';
 
@@ -24,7 +23,6 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly authService: AuthService,
     private readonly appService: AppService,
-    private readonly dbService: DbService,
     private readonly eventsService: EventsService,
   ) {}
 
@@ -143,7 +141,7 @@ export class UsersController {
       this.logger.log(`deleteMe userId=${payload.sub}`);
 
       // 1. Get user identity for LiveKit
-      const user = await this.dbService.findUserById(payload.sub);
+      const user = await this.usersService.findById(payload.sub);
 
       // 2. LiveKit에서 강제 퇴장 (관제 페이지 목록에서 즉시 제거)
       if (user?.identity) {

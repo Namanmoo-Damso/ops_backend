@@ -1,4 +1,5 @@
-export { UsersModule } from './users.module';
-export { UsersController } from './users.controller';
-export { UsersService } from './users.service';
+export * from './users.module';
+export * from './users.controller';
+export * from './users.service';
+export * from './users.repository';
 export * from './dto';
