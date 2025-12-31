@@ -1,0 +1,55 @@
+{
+  "name": "ops-api",
+  "version": "1.0.0",
+  "description": "OPS Backend API Server",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^5.0.1",
+    "@prisma/client": "^6.2.1",
+    "apn": "^2.2.0",
+    "ioredis": "^5.8.2",
+    "jsonwebtoken": "^9.0.3",
+    "livekit-server-sdk": "^2.15.0",
+    "openai": "^4.77.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "^11.0.1",
+    "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.10.7",
+    "eslint": "^9.18.0",
+    "jest": "^30.0.0",
+    "prisma": "^6.2.1",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.7.3"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "testEnvironment": "node"
+  }
+}

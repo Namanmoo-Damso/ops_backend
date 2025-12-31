@@ -1,0 +1,122 @@
+# Multi-repo local testing compose
+# 분리 전 로컬 테스트용. ECS Fargate 배포 시 불필요.
+
+services:
+  # === Infrastructure ===
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    network_mode: host
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    env_file:
+      - ./db.env
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # === Application Services ===
+  ops-api:
+    build:
+      context: ./services/ops-api
+    env_file:
+      - ./api.env
+    environment:
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-dev-secret}
+    volumes:
+      - ./secrets:/secrets:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  ops-admin-api:
+    build:
+      context: ./services/ops-admin-api
+    env_file:
+      - ./api.env
+    environment:
+      - PORT=8081
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-dev-secret}
+      - OPS_API_URL=http://ops-api:8080
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ops-api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8081:8081"
+    restart: unless-stopped
+
+  ops-admin-web:
+    build:
+      context: ./services/ops-admin-web
+      args:
+        NEXT_PUBLIC_API_BASE: https://2.sodam.store
+        NEXT_PUBLIC_API_URL: https://2.sodam.store
+        NEXT_PUBLIC_LIVEKIT_URL: wss://2.sodam.store
+        NEXT_PUBLIC_ROOM_NAME: demo-room
+        NEXT_PUBLIC_NAVER_MAP_CLIENT_ID: 98ncl9cv85
+        NEXT_PUBLIC_KAKAO_CLIENT_ID: ac893137a826fee92d16cf6e0b7039ee
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: 810981442237-ub7rgb46fkf31he5k383dhnb4m4tmqql.apps.googleusercontent.com
+    env_file:
+      - ./web.env
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  ops-agent:
+    build:
+      context: ./services/ops-agent
+    environment:
+      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-northeast-2}
+    depends_on:
+      - livekit
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  db_data:
+  redis_data:
