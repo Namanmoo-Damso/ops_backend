@@ -1,5 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Inject, forwardRef, Optional } from '@nestjs/common';
 import apn from 'apn';
+import { DevicesService } from '../devices';
 
 type PushType = 'alert' | 'voip';
 type PushEnvMode = 'prod' | 'sandbox' | 'both';
@@ -9,6 +10,10 @@ type PushResult = {
   sent: number;
   failed: number;
   invalidTokens: string[];
+};
+
+type SendPushResult = PushResult & {
+  requested: number;
 };
 
 const chunk = <T>(items: T[], size: number) => {
@@ -31,7 +36,10 @@ export class PushService implements OnModuleDestroy {
   private prodProvider?: any;
   private sandboxProvider?: any;
 
-  constructor() {
+  constructor(
+    @Inject(forwardRef(() => DevicesService))
+    private readonly devicesService: DevicesService,
+  ) {
     this.keyPath = process.env.APNS_KEY_PATH;
     this.keyId = process.env.APNS_KEY_ID;
     this.teamId = process.env.APNS_TEAM_ID;
@@ -189,5 +197,90 @@ export class PushService implements OnModuleDestroy {
     if (!token) return 'none';
     const suffix = token.slice(-6);
     return `len=${token.length}..${suffix}`;
+  }
+
+  private normalizeEnv(env?: string): PushEnv {
+    return env === 'sandbox' ? 'sandbox' : 'prod';
+  }
+
+  /**
+   * 브로드캐스트 푸시 발송
+   */
+  async sendBroadcastPush(params: {
+    type: PushType;
+    title?: string;
+    body?: string;
+    payload?: Record<string, unknown>;
+    env?: string;
+  }): Promise<SendPushResult> {
+    const tokenType = params.type === 'voip' ? 'voip' : 'apns';
+    const env = params.env ? this.normalizeEnv(params.env) : undefined;
+    const devices = await this.devicesService.listDevices(tokenType, env);
+    const tokens = devices
+      .map((d) => ({
+        token: (tokenType === 'voip' ? d.voip_token : d.apns_token) as string,
+        env: d.env,
+      }))
+      .filter((t) => t.token);
+
+    const result = await this.sendPush({
+      tokens,
+      type: params.type,
+      title: params.title,
+      body: params.body,
+      payload: params.payload,
+    });
+
+    for (const token of result.invalidTokens) {
+      await this.devicesService.invalidateToken(tokenType, token);
+    }
+
+    this.logger.log(
+      `pushBroadcast type=${params.type} requested=${tokens.length} sent=${result.sent} failed=${result.failed} invalid=${result.invalidTokens.length}`,
+    );
+    return { ...result, requested: tokens.length };
+  }
+
+  /**
+   * 특정 사용자에게 푸시 발송
+   */
+  async sendUserPush(params: {
+    identity: string;
+    type: PushType;
+    title?: string;
+    body?: string;
+    payload?: Record<string, unknown>;
+    env?: string;
+  }): Promise<SendPushResult> {
+    const tokenType = params.type === 'voip' ? 'voip' : 'apns';
+    const env = params.env ? this.normalizeEnv(params.env) : undefined;
+    const devices = await this.devicesService.listByIdentity(
+      params.identity,
+      tokenType,
+      env,
+    );
+    const tokens = devices
+      .map((d) => ({
+        token: (tokenType === 'voip' ? d.voip_token : d.apns_token) as string,
+        env: d.env,
+      }))
+      .filter((t) => t.token);
+
+    const result = await this.sendPush({
+      tokens,
+      type: params.type,
+      title: params.title,
+      body: params.body,
+      payload: params.payload,
+    });
+
+    for (const token of result.invalidTokens) {
+      await this.devicesService.invalidateToken(tokenType, token);
+    }
+
+    this.logger.log(
+      `pushUser identity=${params.identity} type=${params.type} requested=${tokens.length} sent=${result.sent} failed=${result.failed} invalid=${result.invalidTokens.length}`,
+    );
+    return { ...result, requested: tokens.length };
   }
 }

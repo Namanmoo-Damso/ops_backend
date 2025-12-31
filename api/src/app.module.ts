@@ -12,7 +12,7 @@ import { CallsModule } from './calls';
 import { RoomsModule } from './rooms';
 import { RtcModule } from './rtc';
 import { DevicesModule } from './devices';
-import { PushModule, PushController } from './push';
+import { PushModule } from './push';
 import { AdminModule } from './admin';
 import { AiModule } from './ai';
 import { SchedulerModule } from './scheduler';
@@ -41,7 +41,7 @@ import { EventsModule } from './events';
     AdminModule,
     SchedulerModule,
   ],
-  controllers: [AppController, PushController],
+  controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}

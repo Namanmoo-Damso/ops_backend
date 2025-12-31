@@ -7,19 +7,38 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
+import { PushService } from './push.service';
+import { AuthService } from '../auth';
+
+const isAuthRequired = (): boolean => process.env.API_AUTH_REQUIRED === 'true';
 
 @Controller('v1/push')
 export class PushController {
   private readonly logger = new Logger(PushController.name);
 
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly pushService: PushService,
+    private readonly authService: AuthService,
+  ) {}
 
   private summarizePayloadKeys(payload: Record<string, unknown> | undefined): string {
     if (!payload) return 'none';
     const keys = Object.keys(payload);
     if (keys.length === 0) return 'empty';
     return keys.join(',');
+  }
+
+  private getAuthContext(authorization?: string): { identity?: string } | null {
+    if (!authorization) return null;
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length)
+      : '';
+    if (!token) return null;
+    try {
+      return this.authService.verifyApiToken(token);
+    } catch {
+      return null;
+    }
   }
 
   @Post('broadcast')
@@ -34,9 +53,8 @@ export class PushController {
       env?: 'prod' | 'sandbox';
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -48,7 +66,7 @@ export class PushController {
     this.logger.log(
       `pushBroadcast type=${type} env=${body.env ?? 'default'} payloadKeys=${this.summarizePayloadKeys(body.payload)}`,
     );
-    return await this.appService.sendBroadcastPush({
+    return await this.pushService.sendBroadcastPush({
       type,
       title: body.title,
       body: body.body,
@@ -70,9 +88,8 @@ export class PushController {
       env?: 'prod' | 'sandbox';
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
+    const auth = this.getAuthContext(authorization);
+    if (isAuthRequired() && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -89,7 +106,7 @@ export class PushController {
     this.logger.log(
       `pushUser identity=${identity} type=${type} env=${body.env ?? 'default'} payloadKeys=${this.summarizePayloadKeys(body.payload)}`,
     );
-    return await this.appService.sendUserPush({
+    return await this.pushService.sendUserPush({
       identity,
       type,
       title: body.title,
