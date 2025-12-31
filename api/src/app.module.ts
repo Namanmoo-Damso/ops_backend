@@ -17,6 +17,8 @@ import { AiModule } from './ai';
 import { SchedulerModule } from './scheduler';
 import { PrismaModule } from './prisma';
 import { EventsModule } from './events';
+import { InfrastructureModule } from './infrastructure';
+import { InternalModule } from './internal';
 
 @Module({
   imports: [
@@ -28,6 +30,7 @@ import { EventsModule } from './events';
     PushModule,
     AiModule,
     EventsModule,
+    InfrastructureModule,
     // 기능 모듈
     AuthModule,
     UsersModule,
@@ -39,6 +42,8 @@ import { EventsModule } from './events';
     DevicesModule,
     AdminModule,
     SchedulerModule,
+    // 서버 간 통신
+    InternalModule,
   ],
   controllers: [AppController],
 })

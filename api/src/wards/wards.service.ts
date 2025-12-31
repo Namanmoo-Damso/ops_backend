@@ -157,6 +157,13 @@ export class WardsService {
     };
   }
 
+  /**
+   * Ward ID로 조회 (Internal API용)
+   */
+  async findById(wardId: string) {
+    return this.wardsRepository.findById(wardId);
+  }
+
   // Helper method for user lookup (temporary until proper injection)
   private async findUserById(userId: string) {
     const user = await this.prisma.user.findUnique({

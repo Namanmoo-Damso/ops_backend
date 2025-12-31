@@ -125,4 +125,16 @@ export class DevicesService {
   async listDevices(tokenType: 'apns' | 'voip', env?: string) {
     return this.devicesRepository.list({ tokenType, env });
   }
+
+  /**
+   * User ID로 디바이스 목록 조회 (Internal API용)
+   */
+  async findByUserId(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) return [];
+
+    return this.devicesRepository.listAllByIdentity({ identity: user.identity });
+  }
 }
