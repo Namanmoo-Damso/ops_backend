@@ -1,7 +1,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
-import { DbService } from '../database';
+import { AuthRepository } from './auth.repository';
 
 type UserType = 'guardian' | 'ward';
 
@@ -83,7 +83,7 @@ export class AuthService {
   private readonly accessTokenExpiry: number;
   private readonly refreshTokenExpiry: number;
 
-  constructor(private readonly dbService: DbService) {
+  constructor(private readonly authRepository: AuthRepository) {
     const secret = process.env.API_JWT_SECRET || process.env.JWT_SECRET;
     if (!secret) {
       throw new Error('API_JWT_SECRET or JWT_SECRET environment variable is required');
@@ -102,7 +102,7 @@ export class AuthService {
     this.logger.log(`kakaoLogin kakaoId=${kakaoProfile.kakaoId} email=${kakaoProfile.email ?? 'none'}`);
 
     // 2. 기존 사용자 확인
-    const existingUser = await this.dbService.findUserByKakaoId(kakaoProfile.kakaoId);
+    const existingUser = await this.authRepository.findUserByKakaoId(kakaoProfile.kakaoId);
 
     if (existingUser) {
       // 기존 사용자 - JWT 발급
@@ -127,7 +127,7 @@ export class AuthService {
       return this.handleWardRegistration(kakaoProfile);
     } else {
       // 보호자 - 사용자 먼저 생성 (user_type은 null로, 추가 정보 입력 후 guardian으로 변경)
-      const user = await this.dbService.createUserWithKakao({
+      const user = await this.authRepository.createUserWithKakao({
         kakaoId: kakaoProfile.kakaoId,
         email: kakaoProfile.email,
         nickname: kakaoProfile.nickname,
@@ -180,11 +180,11 @@ export class AuthService {
   ): Promise<KakaoLoginResult> {
     // 어르신의 이메일로 보호자 매칭 시도
     const matchedGuardian = kakaoProfile.email
-      ? await this.dbService.findGuardianByWardEmail(kakaoProfile.email)
+      ? await this.authRepository.findGuardianByWardEmail(kakaoProfile.email)
       : undefined;
 
     // 사용자 생성
-    const user = await this.dbService.createUserWithKakao({
+    const user = await this.authRepository.createUserWithKakao({
       kakaoId: kakaoProfile.kakaoId,
       email: kakaoProfile.email,
       nickname: kakaoProfile.nickname,
@@ -193,7 +193,7 @@ export class AuthService {
     });
 
     // 어르신 정보 생성
-    const ward = await this.dbService.createWard({
+    const ward = await this.authRepository.createWard({
       userId: user.id,
       phoneNumber: '', // 이후 설정에서 입력
       guardianId: matchedGuardian?.id ?? null,
@@ -203,7 +203,7 @@ export class AuthService {
 
     if (matchedGuardian) {
       this.logger.log(`handleWardRegistration matched userId=${user.id} guardianId=${matchedGuardian.id}`);
-      const guardianUser = await this.dbService.findUserById(matchedGuardian.user_id);
+      const guardianUser = await this.authRepository.findUserById(matchedGuardian.user_id);
       return {
         isNewUser: true,
         requiresRegistration: false,
@@ -270,7 +270,7 @@ export class AuthService {
     // Refresh token을 DB에 저장
     const tokenHash = this.hashToken(refreshToken);
     const expiresAt = new Date(Date.now() + this.refreshTokenExpiry * 1000);
-    await this.dbService.saveRefreshToken({
+    await this.authRepository.saveRefreshToken({
       userId,
       tokenHash,
       expiresAt,
@@ -303,21 +303,21 @@ export class AuthService {
 
     // 2. DB에서 토큰 확인
     const tokenHash = this.hashToken(refreshToken);
-    const storedToken = await this.dbService.findRefreshToken(tokenHash);
+    const storedToken = await this.authRepository.findRefreshToken(tokenHash);
     if (!storedToken) {
       this.logger.warn(`refreshTokens token not found userId=${payload.sub}`);
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
     // 3. 사용자 확인
-    const user = await this.dbService.findUserById(payload.sub);
+    const user = await this.authRepository.findUserById(payload.sub);
     if (!user) {
       this.logger.warn(`refreshTokens user not found userId=${payload.sub}`);
       throw new UnauthorizedException('User not found');
     }
 
     // 4. 기존 토큰 무효화 (Token Rotation)
-    await this.dbService.deleteRefreshToken(tokenHash);
+    await this.authRepository.deleteRefreshToken(tokenHash);
 
     // 5. 새 토큰 발급
     this.logger.log(`refreshTokens userId=${user.id}`);
@@ -336,7 +336,7 @@ export class AuthService {
     }
 
     // 2. 사용자 조회
-    const user = await this.dbService.findUserById(payload.sub);
+    const user = await this.authRepository.findUserById(payload.sub);
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
@@ -347,10 +347,10 @@ export class AuthService {
     }
 
     // 4. user_type을 guardian으로 업데이트
-    await this.dbService.updateUserType(user.id, 'guardian');
+    await this.authRepository.updateUserType(user.id, 'guardian');
 
     // 5. 보호자 정보 생성
-    const guardian = await this.dbService.createGuardian({
+    const guardian = await this.authRepository.createGuardian({
       userId: user.id,
       wardEmail: params.wardEmail,
       wardPhoneNumber: params.wardPhoneNumber,

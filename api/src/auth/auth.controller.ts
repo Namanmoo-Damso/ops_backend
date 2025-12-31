@@ -8,13 +8,13 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { AuthRepository } from './auth.repository';
 import { AppService } from '../app.service';
 import {
   KakaoLoginDto,
   RefreshTokenDto,
   AnonymousAuthDto,
 } from './dto';
-import { DbService } from '../database';
 import { EventsService } from '../events';
 
 @Controller('v1/auth')
@@ -23,8 +23,8 @@ export class AuthController {
 
   constructor(
     private readonly authService: AuthService,
+    private readonly authRepository: AuthRepository,
     private readonly appService: AppService,
-    private readonly dbService: DbService,
     private readonly eventsService: EventsService,
   ) {}
 
@@ -106,7 +106,7 @@ export class AuthController {
 
     try {
       // 0. Get user identity for LiveKit
-      const user = await this.dbService.findUserById(userId);
+      const user = await this.authRepository.findUserById(userId);
       const identity = user?.identity;
 
       // 1. LiveKit에서 강제 퇴장 (관제 페이지 목록에서 즉시 제거)
@@ -122,13 +122,13 @@ export class AuthController {
       }
 
       // 2. Delete room members (모니터링 목록에서 제거)
-      await this.dbService.deleteRoomMembersByUserId(userId);
+      await this.authRepository.deleteRoomMembersByUserId(userId);
 
       // 3. Delete devices (푸시 토큰 제거)
-      await this.dbService.deleteDevicesByUserId(userId);
+      await this.authRepository.deleteDevicesByUserId(userId);
 
       // 4. Delete refresh tokens
-      await this.dbService.deleteUserRefreshTokens(userId);
+      await this.authRepository.deleteUserRefreshTokens(userId);
 
       return {
         success: true,
