@@ -15,6 +15,7 @@ import { PushModule, PushController } from './push';
 import { AdminModule } from './admin';
 import { AiModule } from './ai';
 import { SchedulerModule } from './scheduler';
+import { PrismaModule } from './prisma';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SchedulerModule } from './scheduler';
     // 전역 모듈 (순서 중요)
     CommonModule,
     DatabaseModule,
+    PrismaModule,
     PushModule,
     AiModule,
     // 기능 모듈

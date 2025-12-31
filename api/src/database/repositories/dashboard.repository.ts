@@ -3,96 +3,107 @@
  * 대시보드 통계 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
+import { PrismaService } from '../../prisma';
+import { Prisma } from '../../generated/prisma';
 
 @Injectable()
 export class DashboardRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getOverview() {
-    const result = await this.pool.query<{
-      total_wards: string;
-      active_wards: string;
-      total_guardians: string;
-      total_organizations: string;
-      total_calls: string;
-      total_call_minutes: string;
-    }>(
-      `select
-        (select count(*) from wards) as total_wards,
-        (select count(distinct w.id) from wards w
-         join ward_current_locations wcl on w.id = wcl.ward_id
-         where wcl.last_updated > now() - interval '24 hours') as active_wards,
-        (select count(*) from guardians) as total_guardians,
-        (select count(*) from organizations) as total_organizations,
-        (select count(*) from calls where state = 'ended') as total_calls,
-        (select coalesce(sum(extract(epoch from (ended_at - answered_at))/60), 0)
-         from calls where state = 'ended' and answered_at is not null) as total_call_minutes`,
-    );
+    const result = await this.prisma.$queryRaw<
+      Array<{
+        total_wards: bigint;
+        active_wards: bigint;
+        total_guardians: bigint;
+        total_organizations: bigint;
+        total_calls: bigint;
+        total_call_minutes: number;
+      }>
+    >`
+      SELECT
+        (SELECT count(*) FROM wards) as total_wards,
+        (SELECT count(DISTINCT w.id) FROM wards w
+         JOIN ward_current_locations wcl ON w.id = wcl.ward_id
+         WHERE wcl.last_updated > now() - interval '24 hours') as active_wards,
+        (SELECT count(*) FROM guardians) as total_guardians,
+        (SELECT count(*) FROM organizations) as total_organizations,
+        (SELECT count(*) FROM calls WHERE state = 'ended') as total_calls,
+        (SELECT coalesce(sum(extract(epoch from (ended_at - answered_at))/60), 0)
+         FROM calls WHERE state = 'ended' AND answered_at IS NOT NULL) as total_call_minutes
+    `;
+
+    const row = result[0];
     return {
-      totalWards: parseInt(result.rows[0].total_wards, 10),
-      activeWards: parseInt(result.rows[0].active_wards, 10),
-      totalGuardians: parseInt(result.rows[0].total_guardians, 10),
-      totalOrganizations: parseInt(result.rows[0].total_organizations, 10),
-      totalCalls: parseInt(result.rows[0].total_calls, 10),
-      totalCallMinutes: Math.round(parseFloat(result.rows[0].total_call_minutes)),
+      totalWards: Number(row.total_wards),
+      activeWards: Number(row.active_wards),
+      totalGuardians: Number(row.total_guardians),
+      totalOrganizations: Number(row.total_organizations),
+      totalCalls: Number(row.total_calls),
+      totalCallMinutes: Math.round(Number(row.total_call_minutes)),
     };
   }
 
   async getTodayStats() {
-    const result = await this.pool.query<{
-      calls: string;
-      avg_duration: string | null;
-      emergencies: string;
-      new_registrations: string;
-    }>(
-      `select
-        (select count(*) from calls
-         where created_at >= current_date and state = 'ended') as calls,
-        (select avg(extract(epoch from (ended_at - answered_at))/60)
-         from calls
-         where created_at >= current_date and state = 'ended' and answered_at is not null) as avg_duration,
-        (select count(*) from emergencies
-         where created_at >= current_date) as emergencies,
-        (select count(*) from wards
-         where created_at >= current_date) as new_registrations`,
-    );
+    const result = await this.prisma.$queryRaw<
+      Array<{
+        calls: bigint;
+        avg_duration: number | null;
+        emergencies: bigint;
+        new_registrations: bigint;
+      }>
+    >`
+      SELECT
+        (SELECT count(*) FROM calls
+         WHERE created_at >= current_date AND state = 'ended') as calls,
+        (SELECT avg(extract(epoch from (ended_at - answered_at))/60)
+         FROM calls
+         WHERE created_at >= current_date AND state = 'ended' AND answered_at IS NOT NULL) as avg_duration,
+        (SELECT count(*) FROM emergencies
+         WHERE created_at >= current_date) as emergencies,
+        (SELECT count(*) FROM wards
+         WHERE created_at >= current_date) as new_registrations
+    `;
+
+    const row = result[0];
     return {
-      calls: parseInt(result.rows[0].calls, 10),
-      avgDuration: Math.round(parseFloat(result.rows[0].avg_duration || '0')),
-      emergencies: parseInt(result.rows[0].emergencies, 10),
-      newRegistrations: parseInt(result.rows[0].new_registrations, 10),
+      calls: Number(row.calls),
+      avgDuration: Math.round(Number(row.avg_duration || 0)),
+      emergencies: Number(row.emergencies),
+      newRegistrations: Number(row.new_registrations),
     };
   }
 
   async getWeeklyTrend() {
-    const result = await this.pool.query<{
-      day: string;
-      day_label: string;
-      calls: string;
-      emergencies: string;
-    }>(
-      `with days as (
-        select generate_series(
+    const result = await this.prisma.$queryRaw<
+      Array<{
+        day: string;
+        day_label: string;
+        calls: bigint;
+        emergencies: bigint;
+      }>
+    >`
+      WITH days AS (
+        SELECT generate_series(
           current_date - interval '6 days',
           current_date,
           '1 day'::interval
         )::date as day
       )
-      select
+      SELECT
         d.day::text,
         to_char(d.day, 'Dy') as day_label,
         coalesce((
-          select count(*) from calls c
-          where c.created_at::date = d.day and c.state = 'ended'
-        ), 0)::text as calls,
+          SELECT count(*) FROM calls c
+          WHERE c.created_at::date = d.day AND c.state = 'ended'
+        ), 0) as calls,
         coalesce((
-          select count(*) from emergencies e
-          where e.created_at::date = d.day
-        ), 0)::text as emergencies
-      from days d
-      order by d.day`,
-    );
+          SELECT count(*) FROM emergencies e
+          WHERE e.created_at::date = d.day
+        ), 0) as emergencies
+      FROM days d
+      ORDER BY d.day
+    `;
 
     const dayLabels: Record<string, string> = {
       Mon: '월',
@@ -105,66 +116,55 @@ export class DashboardRepository {
     };
 
     return {
-      calls: result.rows.map((r) => parseInt(r.calls, 10)),
-      emergencies: result.rows.map((r) => parseInt(r.emergencies, 10)),
-      labels: result.rows.map((r) => dayLabels[r.day_label] || r.day_label),
+      calls: result.map((r) => Number(r.calls)),
+      emergencies: result.map((r) => Number(r.emergencies)),
+      labels: result.map((r) => dayLabels[r.day_label] || r.day_label),
     };
   }
 
   async getMoodDistribution() {
-    const result = await this.pool.query<{
-      positive: string;
-      neutral: string;
-      negative: string;
-    }>(
-      `select
-        (select count(*) from call_summaries where mood = 'positive')::text as positive,
-        (select count(*) from call_summaries where mood = 'neutral')::text as neutral,
-        (select count(*) from call_summaries where mood = 'negative')::text as negative`,
-    );
-    const positive = parseInt(result.rows[0].positive, 10);
-    const neutral = parseInt(result.rows[0].neutral, 10);
-    const negative = parseInt(result.rows[0].negative, 10);
-    const total = positive + neutral + negative;
+    const [positiveCount, neutralCount, negativeCount] = await Promise.all([
+      this.prisma.callSummary.count({ where: { mood: 'positive' } }),
+      this.prisma.callSummary.count({ where: { mood: 'neutral' } }),
+      this.prisma.callSummary.count({ where: { mood: 'negative' } }),
+    ]);
+
+    const total = positiveCount + neutralCount + negativeCount;
 
     if (total === 0) {
       return { positive: 0, neutral: 0, negative: 0 };
     }
 
     return {
-      positive: Math.round((positive / total) * 100),
-      neutral: Math.round((neutral / total) * 100),
-      negative: Math.round((negative / total) * 100),
+      positive: Math.round((positiveCount / total) * 100),
+      neutral: Math.round((neutralCount / total) * 100),
+      negative: Math.round((negativeCount / total) * 100),
     };
   }
 
   async getHealthAlertsSummary() {
-    const result = await this.pool.query<{
-      warning: string;
-      info: string;
-      unread: string;
-    }>(
-      `select
-        (select count(*) from health_alerts where alert_type = 'warning')::text as warning,
-        (select count(*) from health_alerts where alert_type = 'info')::text as info,
-        (select count(*) from health_alerts where is_read = false)::text as unread`,
-    );
+    const [warningCount, infoCount, unreadCount] = await Promise.all([
+      this.prisma.healthAlert.count({ where: { alertType: 'warning' } }),
+      this.prisma.healthAlert.count({ where: { alertType: 'info' } }),
+      this.prisma.healthAlert.count({ where: { isRead: false } }),
+    ]);
+
     return {
-      warning: parseInt(result.rows[0].warning, 10),
-      info: parseInt(result.rows[0].info, 10),
-      unread: parseInt(result.rows[0].unread, 10),
+      warning: warningCount,
+      info: infoCount,
+      unread: unreadCount,
     };
   }
 
   async getTopHealthKeywords(limit: number = 5) {
-    const result = await this.pool.query<{
-      health_keywords: Record<string, unknown> | null;
-    }>(
-      `select health_keywords
-       from call_summaries
-       where health_keywords is not null
-         and created_at > now() - interval '30 days'`,
-    );
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const summaries = await this.prisma.callSummary.findMany({
+      where: {
+        healthKeywords: { not: Prisma.DbNull },
+        createdAt: { gt: cutoff },
+      },
+      select: { healthKeywords: true },
+    });
 
     const keywordCounts: Record<string, number> = {};
     const keywordLabels: Record<string, string> = {
@@ -174,9 +174,10 @@ export class DashboardRepository {
       medication: '약 복용',
     };
 
-    for (const row of result.rows) {
-      if (row.health_keywords) {
-        for (const [key, value] of Object.entries(row.health_keywords)) {
+    for (const row of summaries) {
+      const keywords = row.healthKeywords as Record<string, unknown> | null;
+      if (keywords) {
+        for (const [key, value] of Object.entries(keywords)) {
           if (typeof value === 'number') {
             keywordCounts[key] = (keywordCounts[key] || 0) + value;
           } else if (value) {
@@ -196,105 +197,108 @@ export class DashboardRepository {
   }
 
   async getOrganizationStats() {
-    const result = await this.pool.query<{
-      id: string;
-      name: string;
-      wards: string;
-      calls: string;
-    }>(
-      `select
+    const result = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        name: string;
+        wards: bigint;
+        calls: bigint;
+      }>
+    >`
+      SELECT
         o.id,
         o.name,
-        (select count(*) from wards w where w.organization_id = o.id)::text as wards,
-        (select count(*) from calls c
-         join wards w on c.callee_user_id = w.user_id
-         where w.organization_id = o.id and c.state = 'ended')::text as calls
-       from organizations o
-       order by wards desc`,
-    );
-    return result.rows.map((r) => ({
+        (SELECT count(*) FROM wards w WHERE w.organization_id = o.id) as wards,
+        (SELECT count(*) FROM calls c
+         JOIN wards w ON c.callee_user_id = w.user_id
+         WHERE w.organization_id = o.id AND c.state = 'ended') as calls
+      FROM organizations o
+      ORDER BY wards DESC
+    `;
+
+    return result.map((r) => ({
       id: r.id,
       name: r.name,
-      wards: parseInt(r.wards, 10),
-      calls: parseInt(r.calls, 10),
+      wards: Number(r.wards),
+      calls: Number(r.calls),
     }));
   }
 
   async getRealtimeStats() {
-    const result = await this.pool.query<{
-      active_calls: string;
-      online_wards: string;
-      pending_emergencies: string;
-    }>(
-      `select
-        (select count(*) from calls where state = 'answered')::text as active_calls,
-        (select count(*) from ward_current_locations
-         where last_updated > now() - interval '5 minutes')::text as online_wards,
-        (select count(*) from emergencies where status = 'active')::text as pending_emergencies`,
-    );
+    const [activeCalls, onlineWards, pendingEmergencies] = await Promise.all([
+      this.prisma.call.count({ where: { state: 'answered' } }),
+      this.prisma.wardCurrentLocation.count({
+        where: {
+          lastUpdated: { gt: new Date(Date.now() - 5 * 60 * 1000) },
+        },
+      }),
+      this.prisma.emergency.count({ where: { status: 'active' } }),
+    ]);
+
     return {
-      activeCalls: parseInt(result.rows[0].active_calls, 10),
-      onlineWards: parseInt(result.rows[0].online_wards, 10),
-      pendingEmergencies: parseInt(result.rows[0].pending_emergencies, 10),
+      activeCalls,
+      onlineWards,
+      pendingEmergencies,
     };
   }
 
   async getRecentActivity(limit: number = 10) {
-    const callsResult = await this.pool.query<{
-      type: string;
-      ward_name: string | null;
-      duration: string | null;
-      time: string;
-      created_at: string;
-    }>(
-      `(
-        select
+    const result = await this.prisma.$queryRaw<
+      Array<{
+        type: string;
+        ward_name: string | null;
+        duration: number | null;
+        time: string;
+        created_at: Date;
+      }>
+    >`
+      (
+        SELECT
           'call_started' as type,
           u.nickname as ward_name,
-          null as duration,
+          null::float as duration,
           to_char(c.created_at, 'HH24:MI') as time,
           c.created_at
-        from calls c
-        join users u on c.callee_user_id = u.id
-        where c.state in ('ringing', 'answered')
-          and c.created_at > now() - interval '1 hour'
+        FROM calls c
+        JOIN users u ON c.callee_user_id = u.id
+        WHERE c.state IN ('ringing', 'answered')
+          AND c.created_at > now() - interval '1 hour'
       )
-      union all
+      UNION ALL
       (
-        select
+        SELECT
           'call_ended' as type,
           u.nickname as ward_name,
           extract(epoch from (c.ended_at - c.answered_at))/60 as duration,
           to_char(c.ended_at, 'HH24:MI') as time,
           c.ended_at as created_at
-        from calls c
-        join users u on c.callee_user_id = u.id
-        where c.state = 'ended'
-          and c.ended_at > now() - interval '1 hour'
-          and c.answered_at is not null
+        FROM calls c
+        JOIN users u ON c.callee_user_id = u.id
+        WHERE c.state = 'ended'
+          AND c.ended_at > now() - interval '1 hour'
+          AND c.answered_at IS NOT NULL
       )
-      union all
+      UNION ALL
       (
-        select
+        SELECT
           'emergency' as type,
           u.nickname as ward_name,
-          null as duration,
+          null::float as duration,
           to_char(e.created_at, 'HH24:MI') as time,
           e.created_at
-        from emergencies e
-        join wards w on e.ward_id = w.id
-        join users u on w.user_id = u.id
-        where e.created_at > now() - interval '24 hours'
+        FROM emergencies e
+        JOIN wards w ON e.ward_id = w.id
+        JOIN users u ON w.user_id = u.id
+        WHERE e.created_at > now() - interval '24 hours'
       )
-      order by created_at desc
-      limit $1`,
-      [limit],
-    );
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `;
 
-    return callsResult.rows.map((r) => ({
+    return result.map((r) => ({
       type: r.type,
       wardName: r.ward_name || '알 수 없음',
-      duration: r.duration ? Math.round(parseFloat(r.duration)) : undefined,
+      duration: r.duration ? Math.round(r.duration) : undefined,
       time: r.time,
     }));
   }

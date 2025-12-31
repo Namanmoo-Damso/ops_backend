@@ -3,33 +3,45 @@
  * rooms, room_members 테이블 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
+import { PrismaService } from '../../prisma';
 import { RoomMemberRow } from '../types';
+import { toRoomMemberRow } from '../prisma-mappers';
 
 @Injectable()
 export class RoomRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async listMembers(roomName: string): Promise<RoomMemberRow[]> {
-    const result = await this.pool.query<RoomMemberRow>(
-      `select u.identity, u.display_name, m.joined_at
-       from room_members m
-       join rooms r on m.room_id = r.id
-       join users u on m.user_id = u.id
-       where r.room_name = $1
-       order by m.joined_at asc`,
-      [roomName],
+    const members = await this.prisma.roomMember.findMany({
+      where: {
+        room: { roomName },
+      },
+      include: {
+        user: {
+          select: {
+            identity: true,
+            displayName: true,
+          },
+        },
+      },
+      orderBy: { joinedAt: 'asc' },
+    });
+
+    return members.map((m) =>
+      toRoomMemberRow({
+        identity: m.user.identity,
+        displayName: m.user.displayName,
+        joinedAt: m.joinedAt,
+      }),
     );
-    return result.rows;
   }
 
   async createIfMissing(roomName: string): Promise<void> {
-    await this.pool.query(
-      `insert into rooms (room_name)
-       values ($1)
-       on conflict (room_name) do nothing`,
-      [roomName],
-    );
+    await this.prisma.room.upsert({
+      where: { roomName },
+      update: {},
+      create: { roomName },
+    });
   }
 
   async upsertMember(params: {
@@ -37,23 +49,30 @@ export class RoomRepository {
     userId: string;
     role: string;
   }): Promise<{ roomId: string }> {
-    const result = await this.pool.query<{ id: string }>(
-      `insert into rooms (room_name)
-       values ($1)
-       on conflict (room_name) do update set room_name = excluded.room_name
-       returning id`,
-      [params.roomName],
-    );
-    const roomId = result.rows[0].id;
+    const room = await this.prisma.room.upsert({
+      where: { roomName: params.roomName },
+      update: {},
+      create: { roomName: params.roomName },
+    });
 
-    await this.pool.query(
-      `insert into room_members (room_id, user_id, role)
-       values ($1, $2, $3)
-       on conflict (room_id, user_id)
-       do update set role = excluded.role, joined_at = now()`,
-      [roomId, params.userId, params.role],
-    );
+    await this.prisma.roomMember.upsert({
+      where: {
+        roomId_userId: {
+          roomId: room.id,
+          userId: params.userId,
+        },
+      },
+      update: {
+        role: params.role,
+        joinedAt: new Date(),
+      },
+      create: {
+        roomId: room.id,
+        userId: params.userId,
+        role: params.role,
+      },
+    });
 
-    return { roomId };
+    return { roomId: room.id };
   }
 }

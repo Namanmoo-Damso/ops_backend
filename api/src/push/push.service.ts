@@ -143,6 +143,8 @@ export class PushService implements OnModuleDestroy {
           if (params.interruptionLevel) {
             notification.interruptionLevel = params.interruptionLevel;
           }
+          // content-available 추가하여 백그라운드에서도 앱이 깨어날 수 있도록
+          notification.contentAvailable = true;
         } else {
           notification.contentAvailable = true;
         }

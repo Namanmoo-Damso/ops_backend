@@ -1,6 +1,7 @@
-import { Module, Global, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Module, Global } from '@nestjs/common';
 import { Pool } from 'pg';
 import { DbService } from './db.service';
+import { PrismaService } from '../prisma';
 import {
   UserRepository,
   DeviceRepository,
@@ -18,7 +19,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Database Pool Provider
- * 모든 Repository에서 공유하는 PostgreSQL 연결 풀
+ * 레거시 코드 호환성을 위해 유지 (추후 제거 예정)
  */
 const DatabasePoolProvider = {
   provide: 'DATABASE_POOL',
@@ -45,60 +46,20 @@ const DatabasePoolProvider = {
 };
 
 /**
- * Repository Factory Providers
- * Pool을 주입받아 Repository 인스턴스 생성
+ * Repository Providers
+ * 모든 Repository가 Prisma로 전환 완료
  */
 const RepositoryProviders = [
-  {
-    provide: UserRepository,
-    useFactory: (pool: Pool) => new UserRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: DeviceRepository,
-    useFactory: (pool: Pool) => new DeviceRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: RoomRepository,
-    useFactory: (pool: Pool) => new RoomRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: CallRepository,
-    useFactory: (pool: Pool) => new CallRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: GuardianRepository,
-    useFactory: (pool: Pool) => new GuardianRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: WardRepository,
-    useFactory: (pool: Pool) => new WardRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: AdminRepository,
-    useFactory: (pool: Pool) => new AdminRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: EmergencyRepository,
-    useFactory: (pool: Pool) => new EmergencyRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: LocationRepository,
-    useFactory: (pool: Pool) => new LocationRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
-  {
-    provide: DashboardRepository,
-    useFactory: (pool: Pool) => new DashboardRepository(pool),
-    inject: ['DATABASE_POOL'],
-  },
+  UserRepository,
+  DeviceRepository,
+  RoomRepository,
+  CallRepository,
+  GuardianRepository,
+  WardRepository,
+  AdminRepository,
+  EmergencyRepository,
+  LocationRepository,
+  DashboardRepository,
 ];
 
 /**
@@ -106,30 +67,23 @@ const RepositoryProviders = [
  *
  * Repository 패턴으로 분리된 데이터베이스 레이어
  * - DbService: Facade (기존 인터페이스 유지)
- * - 10개 Repository: 도메인별 데이터 접근 로직
+ * - 10개 Repository: 모두 Prisma ORM 사용
  *
  * @Global() 데코레이터로 전역 모듈로 등록
  */
 @Global()
 @Module({
   providers: [
-    DatabasePoolProvider,
+    DatabasePoolProvider, // 레거시 호환성 (추후 제거)
+    PrismaService,
     ...RepositoryProviders,
     DbService,
   ],
   exports: [
-    'DATABASE_POOL',
+    'DATABASE_POOL', // 레거시 호환성 (추후 제거)
+    PrismaService,
     DbService,
-    UserRepository,
-    DeviceRepository,
-    RoomRepository,
-    CallRepository,
-    GuardianRepository,
-    WardRepository,
-    AdminRepository,
-    EmergencyRepository,
-    LocationRepository,
-    DashboardRepository,
+    ...RepositoryProviders,
   ],
 })
 export class DatabaseModule {}

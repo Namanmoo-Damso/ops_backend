@@ -87,7 +87,7 @@ export class AiService {
       tags: analysis.tags,
       healthKeywords: analysis.healthKeywords,
       duration: callInfo.duration,
-      createdAt: summary.created_at,
+      createdAt: summary.analyzed_at,
     };
   }
 

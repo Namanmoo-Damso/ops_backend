@@ -3,125 +3,147 @@
  * wards, organization_wards, call_schedules 테이블 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
+import { PrismaService } from '../../prisma';
+import { Prisma } from '../../generated/prisma';
 import { WardRow } from '../types';
+import { toWardRow } from '../prisma-mappers';
 
 @Injectable()
 export class WardRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(params: {
     userId: string;
     phoneNumber: string;
     guardianId: string | null;
   }): Promise<WardRow> {
-    const result = await this.pool.query<WardRow>(
-      `insert into wards (user_id, phone_number, guardian_id, updated_at)
-       values ($1, $2, $3, now())
-       returning id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at`,
-      [params.userId, params.phoneNumber, params.guardianId],
-    );
-    return result.rows[0];
+    const ward = await this.prisma.ward.create({
+      data: {
+        userId: params.userId,
+        phoneNumber: params.phoneNumber,
+        guardianId: params.guardianId,
+      },
+    });
+    return toWardRow(ward);
   }
 
   async findByUserId(userId: string): Promise<WardRow | undefined> {
-    const result = await this.pool.query<WardRow>(
-      `select id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at
-       from wards
-       where user_id = $1
-       limit 1`,
-      [userId],
-    );
-    return result.rows[0];
+    const ward = await this.prisma.ward.findUnique({
+      where: { userId },
+    });
+    return ward ? toWardRow(ward) : undefined;
   }
 
   async findById(wardId: string): Promise<WardRow | undefined> {
-    const result = await this.pool.query<WardRow>(
-      `select id, user_id, phone_number, guardian_id, organization_id, ai_persona,
-              weekly_call_count, call_duration_minutes, created_at, updated_at
-       from wards
-       where id = $1
-       limit 1`,
-      [wardId],
-    );
-    return result.rows[0];
+    const ward = await this.prisma.ward.findUnique({
+      where: { id: wardId },
+    });
+    return ward ? toWardRow(ward) : undefined;
   }
 
-  async findByGuardianId(guardianId: string): Promise<(WardRow & { user_nickname: string | null; user_profile_image_url: string | null }) | undefined> {
-    const result = await this.pool.query<WardRow & { user_nickname: string | null; user_profile_image_url: string | null }>(
-      `select w.id, w.user_id, w.phone_number, w.guardian_id, w.organization_id, w.ai_persona,
-              w.weekly_call_count, w.call_duration_minutes, w.created_at, w.updated_at,
-              u.nickname as user_nickname, u.profile_image_url as user_profile_image_url
-       from wards w
-       join users u on w.user_id = u.id
-       where w.guardian_id = $1
-       limit 1`,
-      [guardianId],
-    );
-    return result.rows[0];
-  }
-
-  async getCallStats(wardId: string) {
-    const result = await this.pool.query<{
-      total_calls: string;
-      avg_duration: string | null;
-    }>(
-      `select
-        count(*) as total_calls,
-        avg(extract(epoch from (c.ended_at - c.answered_at))/60) as avg_duration
-       from calls c
-       where c.callee_user_id = (select user_id from wards where id = $1)
-         and c.state = 'ended'
-         and c.answered_at is not null`,
-      [wardId],
-    );
+  async findByGuardianId(
+    guardianId: string,
+  ): Promise<(WardRow & { user_nickname: string | null; user_profile_image_url: string | null }) | undefined> {
+    const ward = await this.prisma.ward.findFirst({
+      where: { guardianId },
+      include: {
+        user: {
+          select: {
+            nickname: true,
+            profileImageUrl: true,
+          },
+        },
+      },
+    });
+    if (!ward) return undefined;
     return {
-      totalCalls: parseInt(result.rows[0]?.total_calls || '0', 10),
-      avgDuration: Math.round(parseFloat(result.rows[0]?.avg_duration || '0')),
+      ...toWardRow(ward),
+      user_nickname: ward.user.nickname,
+      user_profile_image_url: ward.user.profileImageUrl,
     };
   }
 
+  async getCallStats(wardId: string) {
+    const ward = await this.prisma.ward.findUnique({
+      where: { id: wardId },
+      select: { userId: true },
+    });
+    if (!ward) return { totalCalls: 0, avgDuration: 0 };
+
+    const calls = await this.prisma.call.findMany({
+      where: {
+        calleeUserId: ward.userId,
+        state: 'ended',
+        answeredAt: { not: null },
+      },
+      select: {
+        answeredAt: true,
+        endedAt: true,
+      },
+    });
+
+    const totalCalls = calls.length;
+    let totalDuration = 0;
+    for (const call of calls) {
+      if (call.answeredAt && call.endedAt) {
+        totalDuration += (call.endedAt.getTime() - call.answeredAt.getTime()) / 60000;
+      }
+    }
+    const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
+
+    return { totalCalls, avgDuration };
+  }
+
   async getWeeklyCallChange(wardId: string): Promise<number> {
-    const result = await this.pool.query<{ this_week: string; last_week: string }>(
-      `select
-        (select count(*) from calls c
-         where c.callee_user_id = (select user_id from wards where id = $1)
-           and c.state = 'ended'
-           and c.created_at >= now() - interval '7 days') as this_week,
-        (select count(*) from calls c
-         where c.callee_user_id = (select user_id from wards where id = $1)
-           and c.state = 'ended'
-           and c.created_at >= now() - interval '14 days'
-           and c.created_at < now() - interval '7 days') as last_week`,
-      [wardId],
-    );
-    const thisWeek = parseInt(result.rows[0]?.this_week || '0', 10);
-    const lastWeek = parseInt(result.rows[0]?.last_week || '0', 10);
+    const ward = await this.prisma.ward.findUnique({
+      where: { id: wardId },
+      select: { userId: true },
+    });
+    if (!ward) return 0;
+
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    const thisWeek = await this.prisma.call.count({
+      where: {
+        calleeUserId: ward.userId,
+        state: 'ended',
+        createdAt: { gte: oneWeekAgo },
+      },
+    });
+
+    const lastWeek = await this.prisma.call.count({
+      where: {
+        calleeUserId: ward.userId,
+        state: 'ended',
+        createdAt: { gte: twoWeeksAgo, lt: oneWeekAgo },
+      },
+    });
+
     return thisWeek - lastWeek;
   }
 
   async getMoodStats(wardId: string) {
-    const result = await this.pool.query<{ mood: string; count: string }>(
-      `select mood, count(*) as count
-       from call_summaries
-       where ward_id = $1
-         and mood is not null
-       group by mood`,
-      [wardId],
-    );
+    const summaries = await this.prisma.callSummary.groupBy({
+      by: ['mood'],
+      where: { wardId, mood: { not: null } },
+      _count: true,
+    });
+
     let positive = 0;
     let negative = 0;
     let neutral = 0;
-    for (const row of result.rows) {
-      const count = parseInt(row.count, 10);
-      if (row.mood === 'positive') positive = count;
-      else if (row.mood === 'negative') negative = count;
-      else neutral = count;
+
+    for (const s of summaries) {
+      if (s.mood === 'positive') positive = s._count;
+      else if (s.mood === 'negative') negative = s._count;
+      else neutral = s._count;
     }
+
     const total = positive + negative + neutral;
-    if (total === 0) {
-      return { positive: 0, negative: 0 };
-    }
+    if (total === 0) return { positive: 0, negative: 0 };
+
     return {
       positive: Math.round((positive / total) * 100),
       negative: Math.round((negative / total) * 100),
@@ -129,45 +151,65 @@ export class WardRepository {
   }
 
   async getEmotionTrend(wardId: string, days: number) {
-    const result = await this.pool.query<{
-      date: string;
-      score: string | null;
-      mood: string | null;
-    }>(
-      `select
-        to_char(created_at, 'YYYY-MM-DD') as date,
-        avg(mood_score) as score,
-        mode() within group (order by mood) as mood
-       from call_summaries
-       where ward_id = $1
-         and created_at >= now() - ($2 || ' days')::interval
-       group by to_char(created_at, 'YYYY-MM-DD')
-       order by date`,
-      [wardId, days.toString()],
-    );
-    return result.rows.map((row) => ({
-      date: row.date,
-      score: parseFloat(row.score || '0'),
-      mood: row.mood || 'neutral',
-    }));
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const summaries = await this.prisma.callSummary.findMany({
+      where: {
+        wardId,
+        createdAt: { gte: cutoff },
+      },
+      select: {
+        createdAt: true,
+        moodScore: true,
+        mood: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Group by date
+    const dateMap = new Map<string, { scores: number[]; moods: string[] }>();
+    for (const s of summaries) {
+      const date = s.createdAt.toISOString().split('T')[0];
+      if (!dateMap.has(date)) {
+        dateMap.set(date, { scores: [], moods: [] });
+      }
+      const entry = dateMap.get(date)!;
+      if (s.moodScore) entry.scores.push(Number(s.moodScore));
+      if (s.mood) entry.moods.push(s.mood);
+    }
+
+    const results: Array<{ date: string; score: number; mood: string }> = [];
+    for (const [date, data] of dateMap) {
+      const avgScore = data.scores.length > 0 ? data.scores.reduce((a, b) => a + b, 0) / data.scores.length : 0;
+      // Mode of moods
+      const moodCounts: Record<string, number> = {};
+      for (const m of data.moods) {
+        moodCounts[m] = (moodCounts[m] || 0) + 1;
+      }
+      const topMood = Object.entries(moodCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'neutral';
+      results.push({ date, score: avgScore, mood: topMood });
+    }
+
+    return results;
   }
 
   async getHealthKeywordStats(wardId: string, days: number) {
-    const result = await this.pool.query<{
-      health_keywords: Record<string, unknown> | null;
-    }>(
-      `select health_keywords
-       from call_summaries
-       where ward_id = $1
-         and created_at >= now() - ($2 || ' days')::interval
-         and health_keywords is not null`,
-      [wardId, days.toString()],
-    );
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const summaries = await this.prisma.callSummary.findMany({
+      where: {
+        wardId,
+        createdAt: { gte: cutoff },
+        healthKeywords: { not: Prisma.DbNull },
+      },
+      select: { healthKeywords: true },
+    });
 
     const keywordCounts: Record<string, number> = {};
-    for (const row of result.rows) {
-      if (row.health_keywords) {
-        for (const [key, value] of Object.entries(row.health_keywords)) {
+    for (const row of summaries) {
+      const keywords = row.healthKeywords as Record<string, unknown> | null;
+      if (keywords) {
+        for (const [key, value] of Object.entries(keywords)) {
           if (typeof value === 'number') {
             keywordCounts[key] = (keywordCounts[key] || 0) + value;
           } else {
@@ -186,17 +228,19 @@ export class WardRepository {
   }
 
   async getTopTopics(wardId: string, days: number, limit: number = 5) {
-    const result = await this.pool.query<{ tags: string[] | null }>(
-      `select tags
-       from call_summaries
-       where ward_id = $1
-         and created_at >= now() - ($2 || ' days')::interval
-         and tags is not null`,
-      [wardId, days.toString()],
-    );
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const summaries = await this.prisma.callSummary.findMany({
+      where: {
+        wardId,
+        createdAt: { gte: cutoff },
+        tags: { isEmpty: false },
+      },
+      select: { tags: true },
+    });
 
     const topicCounts: Record<string, number> = {};
-    for (const row of result.rows) {
+    for (const row of summaries) {
       if (row.tags) {
         for (const tag of row.tags) {
           topicCounts[tag] = (topicCounts[tag] || 0) + 1;
@@ -216,82 +260,85 @@ export class WardRepository {
     weeklyCallCount?: number;
     callDurationMinutes?: number;
   }): Promise<WardRow | undefined> {
-    const updates: string[] = [];
-    const values: (string | number)[] = [];
-    let paramIndex = 1;
+    try {
+      const updateData: {
+        aiPersona?: string;
+        weeklyCallCount?: number;
+        callDurationMinutes?: number;
+      } = {};
 
-    if (params.aiPersona !== undefined) {
-      updates.push(`ai_persona = $${paramIndex++}`);
-      values.push(params.aiPersona);
-    }
-    if (params.weeklyCallCount !== undefined) {
-      updates.push(`weekly_call_count = $${paramIndex++}`);
-      values.push(params.weeklyCallCount);
-    }
-    if (params.callDurationMinutes !== undefined) {
-      updates.push(`call_duration_minutes = $${paramIndex++}`);
-      values.push(params.callDurationMinutes);
-    }
+      if (params.aiPersona !== undefined) updateData.aiPersona = params.aiPersona;
+      if (params.weeklyCallCount !== undefined) updateData.weeklyCallCount = params.weeklyCallCount;
+      if (params.callDurationMinutes !== undefined) updateData.callDurationMinutes = params.callDurationMinutes;
 
-    if (updates.length === 0) {
+      if (Object.keys(updateData).length === 0) return undefined;
+
+      // Note: params.wardId is actually userId based on original SQL
+      const ward = await this.prisma.ward.update({
+        where: { userId: params.wardId },
+        data: updateData,
+      });
+      return toWardRow(ward);
+    } catch {
       return undefined;
     }
-
-    updates.push('updated_at = now()');
-    values.push(params.wardId);
-
-    const result = await this.pool.query<WardRow>(
-      `update wards
-       set ${updates.join(', ')}
-       where user_id = $${paramIndex}
-       returning id, user_id, phone_number, guardian_id, organization_id, ai_persona, weekly_call_count, call_duration_minutes, created_at, updated_at`,
-      values,
-    );
-    return result.rows[0];
   }
 
   async getWithGuardianInfo(wardId: string) {
-    const result = await this.pool.query<{
-      ward_id: string;
-      ward_user_id: string;
-      ward_identity: string;
-      ward_name: string | null;
-      guardian_id: string | null;
-      guardian_user_id: string | null;
-      guardian_identity: string | null;
-    }>(
-      `select
-        w.id as ward_id,
-        w.user_id as ward_user_id,
-        u.identity as ward_identity,
-        coalesce(u.nickname, u.display_name) as ward_name,
-        w.guardian_id,
-        g.user_id as guardian_user_id,
-        gu.identity as guardian_identity
-       from wards w
-       join users u on w.user_id = u.id
-       left join guardians g on w.guardian_id = g.id
-       left join users gu on g.user_id = gu.id
-       where w.id = $1`,
-      [wardId],
-    );
-    return result.rows[0];
+    const ward = await this.prisma.ward.findUnique({
+      where: { id: wardId },
+      include: {
+        user: {
+          select: {
+            identity: true,
+            nickname: true,
+            displayName: true,
+          },
+        },
+        guardian: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                identity: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!ward) return undefined;
+
+    return {
+      ward_id: ward.id,
+      ward_user_id: ward.userId,
+      ward_identity: ward.user.identity,
+      ward_name: ward.user.nickname ?? ward.user.displayName,
+      guardian_id: ward.guardianId,
+      guardian_user_id: ward.guardian?.userId ?? null,
+      guardian_identity: ward.guardian?.user.identity ?? null,
+    };
   }
 
   // Organization Wards methods
   async findOrganizationWard(organizationId: string, email: string) {
-    const result = await this.pool.query<{
-      id: string;
-      organization_id: string;
-      email: string;
-    }>(
-      `select id, organization_id, email
-       from organization_wards
-       where organization_id = $1 and email = $2
-       limit 1`,
-      [organizationId, email],
-    );
-    return result.rows[0];
+    const orgWard = await this.prisma.organizationWard.findUnique({
+      where: {
+        organizationId_email: { organizationId, email },
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        email: true,
+      },
+    });
+    if (!orgWard) return undefined;
+    return {
+      id: orgWard.id,
+      organization_id: orgWard.organizationId,
+      email: orgWard.email,
+    };
   }
 
   async createOrganizationWard(params: {
@@ -304,61 +351,74 @@ export class WardRepository {
     uploadedByAdminId?: string;
     notes?: string;
   }) {
-    const result = await this.pool.query<{
-      id: string;
-      organization_id: string;
-      uploaded_by_admin_id: string | null;
-      email: string;
-      phone_number: string;
-      name: string;
-      birth_date: string | null;
-      address: string | null;
-      notes: string | null;
-      is_registered: boolean;
-      created_at: string;
-    }>(
-      `insert into organization_wards (organization_id, uploaded_by_admin_id, email, phone_number, name, birth_date, address, notes)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
-       returning id, organization_id, uploaded_by_admin_id, email, phone_number, name, birth_date, address, notes, is_registered, created_at`,
-      [
-        params.organizationId,
-        params.uploadedByAdminId ?? null,
-        params.email,
-        params.phoneNumber,
-        params.name,
-        params.birthDate,
-        params.address,
-        params.notes ?? null,
-      ],
-    );
-    return result.rows[0];
+    const orgWard = await this.prisma.organizationWard.create({
+      data: {
+        organizationId: params.organizationId,
+        uploadedByAdminId: params.uploadedByAdminId ?? null,
+        email: params.email,
+        phoneNumber: params.phoneNumber,
+        name: params.name,
+        birthDate: params.birthDate ? new Date(params.birthDate) : null,
+        address: params.address,
+        notes: params.notes ?? null,
+      },
+    });
+
+    return {
+      id: orgWard.id,
+      organization_id: orgWard.organizationId,
+      uploaded_by_admin_id: orgWard.uploadedByAdminId,
+      email: orgWard.email,
+      phone_number: orgWard.phoneNumber,
+      name: orgWard.name,
+      birth_date: orgWard.birthDate?.toISOString().split('T')[0] ?? null,
+      address: orgWard.address,
+      notes: orgWard.notes,
+      is_registered: orgWard.isRegistered,
+      created_at: orgWard.createdAt.toISOString(),
+    };
   }
 
   async getOrganizationWards(organizationId: string) {
-    const result = await this.pool.query<{
-      id: string;
-      email: string;
-      phone_number: string;
-      name: string;
-      birth_date: string | null;
-      address: string | null;
-      notes: string | null;
-      is_registered: boolean;
-      ward_id: string | null;
-      uploaded_by_admin_id: string | null;
-      created_at: string;
-    }>(
-      `select id, email, phone_number, name, birth_date, address, notes, is_registered, ward_id, uploaded_by_admin_id, created_at
-       from organization_wards
-       where organization_id = $1
-       order by created_at desc`,
-      [organizationId],
-    );
-    return result.rows;
+    const wards = await this.prisma.organizationWard.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return wards.map((w) => ({
+      id: w.id,
+      email: w.email,
+      phone_number: w.phoneNumber,
+      name: w.name,
+      birth_date: w.birthDate?.toISOString().split('T')[0] ?? null,
+      address: w.address,
+      notes: w.notes,
+      is_registered: w.isRegistered,
+      ward_id: w.wardId,
+      uploaded_by_admin_id: w.uploadedByAdminId,
+      created_at: w.createdAt.toISOString(),
+    }));
   }
 
   async getMyManagedWards(adminId: string) {
-    const result = await this.pool.query<{
+    const wards = await this.prisma.organizationWard.findMany({
+      where: { uploadedByAdminId: adminId },
+      include: {
+        organization: { select: { name: true } },
+        ward: {
+          include: {
+            callSummaries: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { mood: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const results: Array<{
       id: string;
       organization_id: string;
       organization_name: string;
@@ -374,100 +434,141 @@ export class WardRepository {
       last_call_at: string | null;
       total_calls: string;
       last_mood: string | null;
-    }>(
-      `select
-        ow.id, ow.organization_id, o.name as organization_name,
-        ow.email, ow.phone_number, ow.name, ow.birth_date, ow.address, ow.notes,
-        ow.is_registered, ow.ward_id, ow.created_at,
-        (select max(c.created_at) from calls c
-         join wards w on c.callee_user_id = w.user_id
-         where w.id = ow.ward_id) as last_call_at,
-        (select count(*) from calls c
-         join wards w on c.callee_user_id = w.user_id
-         where w.id = ow.ward_id and c.state = 'ended')::text as total_calls,
-        (select cs.mood from call_summaries cs
-         where cs.ward_id = ow.ward_id
-         order by cs.created_at desc limit 1) as last_mood
-       from organization_wards ow
-       join organizations o on ow.organization_id = o.id
-       where ow.uploaded_by_admin_id = $1
-       order by ow.created_at desc`,
-      [adminId],
-    );
-    return result.rows;
+    }> = [];
+
+    for (const ow of wards) {
+      // Get call stats for linked ward
+      let lastCallAt: string | null = null;
+      let totalCalls = '0';
+
+      if (ow.ward) {
+        const calls = await this.prisma.call.findMany({
+          where: { calleeUserId: ow.ward.userId, state: 'ended' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { createdAt: true },
+        });
+        lastCallAt = calls[0]?.createdAt.toISOString() ?? null;
+
+        const count = await this.prisma.call.count({
+          where: { calleeUserId: ow.ward.userId, state: 'ended' },
+        });
+        totalCalls = count.toString();
+      }
+
+      results.push({
+        id: ow.id,
+        organization_id: ow.organizationId,
+        organization_name: ow.organization.name,
+        email: ow.email,
+        phone_number: ow.phoneNumber,
+        name: ow.name,
+        birth_date: ow.birthDate?.toISOString().split('T')[0] ?? null,
+        address: ow.address,
+        notes: ow.notes,
+        is_registered: ow.isRegistered,
+        ward_id: ow.wardId,
+        created_at: ow.createdAt.toISOString(),
+        last_call_at: lastCallAt,
+        total_calls: totalCalls,
+        last_mood: ow.ward?.callSummaries[0]?.mood ?? null,
+      });
+    }
+
+    return results;
   }
 
   async getMyManagedWardsStats(adminId: string) {
-    const result = await this.pool.query<{
-      total: string;
-      registered: string;
-      pending: string;
-      positive_mood: string;
-      negative_mood: string;
-    }>(
-      `select
-        count(*)::text as total,
-        count(*) filter (where is_registered = true)::text as registered,
-        count(*) filter (where is_registered = false)::text as pending,
-        (select count(*) from call_summaries cs
-         join organization_wards ow2 on cs.ward_id = ow2.ward_id
-         where ow2.uploaded_by_admin_id = $1 and cs.mood = 'positive')::text as positive_mood,
-        (select count(*) from call_summaries cs
-         join organization_wards ow2 on cs.ward_id = ow2.ward_id
-         where ow2.uploaded_by_admin_id = $1 and cs.mood = 'negative')::text as negative_mood
-       from organization_wards
-       where uploaded_by_admin_id = $1`,
-      [adminId],
-    );
-    return {
-      total: parseInt(result.rows[0]?.total || '0', 10),
-      registered: parseInt(result.rows[0]?.registered || '0', 10),
-      pending: parseInt(result.rows[0]?.pending || '0', 10),
-      positiveMood: parseInt(result.rows[0]?.positive_mood || '0', 10),
-      negativeMood: parseInt(result.rows[0]?.negative_mood || '0', 10),
-    };
+    const [total, registered, pending] = await Promise.all([
+      this.prisma.organizationWard.count({
+        where: { uploadedByAdminId: adminId },
+      }),
+      this.prisma.organizationWard.count({
+        where: { uploadedByAdminId: adminId, isRegistered: true },
+      }),
+      this.prisma.organizationWard.count({
+        where: { uploadedByAdminId: adminId, isRegistered: false },
+      }),
+    ]);
+
+    // Get ward IDs managed by this admin
+    const managedWards = await this.prisma.organizationWard.findMany({
+      where: { uploadedByAdminId: adminId, wardId: { not: null } },
+      select: { wardId: true },
+    });
+    const wardIds = managedWards.map((w) => w.wardId).filter((id): id is string => id !== null);
+
+    let positiveMood = 0;
+    let negativeMood = 0;
+
+    if (wardIds.length > 0) {
+      const [positive, negative] = await Promise.all([
+        this.prisma.callSummary.count({
+          where: { wardId: { in: wardIds }, mood: 'positive' },
+        }),
+        this.prisma.callSummary.count({
+          where: { wardId: { in: wardIds }, mood: 'negative' },
+        }),
+      ]);
+      positiveMood = positive;
+      negativeMood = negative;
+    }
+
+    return { total, registered, pending, positiveMood, negativeMood };
   }
 
   // Call Schedule methods
   async getUpcomingCallSchedules(dayOfWeek: number, startTime: string, endTime: string) {
-    const result = await this.pool.query<{
-      id: string;
-      ward_id: string;
-      ward_user_id: string;
-      ward_identity: string;
-      ai_persona: string;
-      guardian_id: string | null;
-      guardian_user_id: string | null;
-      guardian_identity: string | null;
-    }>(
-      `select
-        cs.id,
-        cs.ward_id,
-        w.user_id as ward_user_id,
-        u.identity as ward_identity,
-        w.ai_persona,
-        w.guardian_id,
-        g.user_id as guardian_user_id,
-        gu.identity as guardian_identity
-       from call_schedules cs
-       join wards w on cs.ward_id = w.id
-       join users u on w.user_id = u.id
-       left join guardians g on w.guardian_id = g.id
-       left join users gu on g.user_id = gu.id
-       where cs.day_of_week = $1
-         and cs.scheduled_time >= $2::time
-         and cs.scheduled_time < $3::time
-         and cs.is_active = true
-         and (cs.reminder_sent_at is null or cs.reminder_sent_at < now() - interval '1 hour')`,
-      [dayOfWeek, startTime, endTime],
-    );
-    return result.rows;
+    // Get all schedules for this day
+    const schedules = await this.prisma.callSchedule.findMany({
+      where: {
+        dayOfWeek,
+        isActive: true,
+      },
+      include: {
+        ward: {
+          include: {
+            user: { select: { identity: true } },
+            guardian: {
+              include: {
+                user: { select: { id: true, identity: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Filter by time range and reminder sent
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+    return schedules
+      .filter((s) => {
+        const schedTime = s.scheduledTime;
+        const hours = schedTime.getUTCHours().toString().padStart(2, '0');
+        const mins = schedTime.getUTCMinutes().toString().padStart(2, '0');
+        const timeStr = `${hours}:${mins}:00`;
+        const inRange = timeStr >= startTime && timeStr < endTime;
+        const notRecentlySent = !s.reminderSentAt || s.reminderSentAt < oneHourAgo;
+        return inRange && notRecentlySent;
+      })
+      .map((s) => ({
+        id: s.id,
+        ward_id: s.wardId,
+        ward_user_id: s.ward.userId,
+        ward_identity: s.ward.user.identity,
+        ai_persona: s.ward.aiPersona ?? '다미',
+        guardian_id: s.ward.guardianId,
+        guardian_user_id: s.ward.guardian?.userId ?? null,
+        guardian_identity: s.ward.guardian?.user.identity ?? null,
+      }));
   }
 
   async markReminderSent(scheduleId: string): Promise<void> {
-    await this.pool.query(
-      `update call_schedules set reminder_sent_at = now() where id = $1`,
-      [scheduleId],
-    );
+    await this.prisma.callSchedule.update({
+      where: { id: scheduleId },
+      data: { reminderSentAt: new Date() },
+    });
   }
 }

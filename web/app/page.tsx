@@ -404,6 +404,17 @@ const RoomShell = ({
       const identity = getParticipantId(participant);
       const displayName = getBaseName(participant);
       tiles.push({ key: identity, ref: trackRef, displayName });
+    });
+    return tiles;
+  }, [tracks]);
+
+  // tracks에서 knownParticipants 업데이트 (useMemo에서 분리)
+  useEffect(() => {
+    tracks.forEach((trackRef) => {
+      const participant = trackRef.participant;
+      if (!participant) return;
+      const identity = getParticipantId(participant);
+      const displayName = getBaseName(participant);
 
       setKnownParticipants((prev) => {
         const existing = prev[identity];
@@ -424,7 +435,6 @@ const RoomShell = ({
         };
       });
     });
-    return tiles;
   }, [tracks]);
 
   useEffect(() => {

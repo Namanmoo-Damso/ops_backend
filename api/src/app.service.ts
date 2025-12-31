@@ -376,7 +376,7 @@ export class AppService {
     let callState: string;
 
     if (existing) {
-      callId = existing.call_id;
+      callId = existing.callId;
       callState = 'ringing';
       this.logger.log(
         `inviteCall deduped caller=${params.callerIdentity} callee=${params.calleeIdentity} room=${roomName} callId=${callId} (resending push)`,
@@ -395,7 +395,7 @@ export class AppService {
         calleeUserId: calleeUser.id,
         roomName,
       });
-      callId = call.call_id;
+      callId = call.id;
       callState = call.state;
     }
 

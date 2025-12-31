@@ -3,12 +3,13 @@
  * devices 테이블 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
-import { DeviceRow, UserRow } from '../types';
+import { PrismaService } from '../../prisma';
+import { UserRow, DeviceRow } from '../types';
+import { toUserRow, toDeviceRow } from '../prisma-mappers';
 
 @Injectable()
 export class DeviceRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async upsert(
     user: UserRow,
@@ -20,57 +21,77 @@ export class DeviceRepository {
       supportsCallKit?: boolean;
     },
   ): Promise<{ user: UserRow; device: DeviceRow | undefined }> {
-    const supportsCallKit = params.supportsCallKit ?? true;
+    const supportsCallkit = params.supportsCallKit ?? true;
     let device: DeviceRow | undefined;
 
     if (params.apnsToken) {
-      const clearVoip = supportsCallKit === false && !params.voipToken;
-      const result = await this.pool.query<DeviceRow>(
-        `insert into devices (user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen)
-         values ($1, $2, $3, ${clearVoip ? 'null' : 'null'}, $4, $5, now())
-         on conflict (apns_token)
-         do update set user_id = excluded.user_id,
-           platform = excluded.platform,
-           supports_callkit = excluded.supports_callkit,
-           ${clearVoip ? 'voip_token = null,' : ''}
-           env = excluded.env,
-           last_seen = now()
-         returning id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen`,
-        [user.id, params.platform, params.apnsToken, supportsCallKit, params.env],
-      );
-      device = result.rows[0];
+      const clearVoip = supportsCallkit === false && !params.voipToken;
+      const result = await this.prisma.device.upsert({
+        where: { apnsToken: params.apnsToken },
+        update: {
+          userId: user.id,
+          platform: params.platform,
+          supportsCallkit,
+          ...(clearVoip && { voipToken: null }),
+          env: params.env,
+          lastSeen: new Date(),
+        },
+        create: {
+          userId: user.id,
+          platform: params.platform,
+          apnsToken: params.apnsToken,
+          voipToken: null,
+          supportsCallkit,
+          env: params.env,
+          lastSeen: new Date(),
+        },
+      });
+      device = toDeviceRow(result);
     }
 
     if (params.voipToken) {
       if (device) {
-        await this.pool.query(
-          `update devices
-           set voip_token = null, last_seen = now()
-           where voip_token = $1 and id <> $2`,
-          [params.voipToken, device.id],
-        );
-        const result = await this.pool.query<DeviceRow>(
-          `update devices
-           set voip_token = $1, supports_callkit = $2, env = $3, last_seen = now()
-           where id = $4
-           returning id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen`,
-          [params.voipToken, supportsCallKit, params.env, device.id],
-        );
-        device = result.rows[0];
+        // Clear voip_token from other devices
+        await this.prisma.device.updateMany({
+          where: {
+            voipToken: params.voipToken,
+            id: { not: device.id },
+          },
+          data: {
+            voipToken: null,
+            lastSeen: new Date(),
+          },
+        });
+        const result = await this.prisma.device.update({
+          where: { id: device.id },
+          data: {
+            voipToken: params.voipToken,
+            supportsCallkit,
+            env: params.env,
+            lastSeen: new Date(),
+          },
+        });
+        device = toDeviceRow(result);
       } else {
-        const result = await this.pool.query<DeviceRow>(
-          `insert into devices (user_id, platform, voip_token, supports_callkit, env, last_seen)
-           values ($1, $2, $3, $4, $5, now())
-           on conflict (voip_token)
-           do update set user_id = excluded.user_id,
-             platform = excluded.platform,
-             supports_callkit = excluded.supports_callkit,
-             env = excluded.env,
-             last_seen = now()
-           returning id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen`,
-          [user.id, params.platform, params.voipToken, supportsCallKit, params.env],
-        );
-        device = result.rows[0];
+        const result = await this.prisma.device.upsert({
+          where: { voipToken: params.voipToken },
+          update: {
+            userId: user.id,
+            platform: params.platform,
+            supportsCallkit,
+            env: params.env,
+            lastSeen: new Date(),
+          },
+          create: {
+            userId: user.id,
+            platform: params.platform,
+            voipToken: params.voipToken,
+            supportsCallkit,
+            env: params.env,
+            lastSeen: new Date(),
+          },
+        });
+        device = toDeviceRow(result);
       }
     }
 
@@ -83,31 +104,30 @@ export class DeviceRepository {
     tokenType?: 'apns' | 'voip';
   }): Promise<DeviceRow[]> {
     const env = params.env ?? 'production';
-    const tokenColumn = params.tokenType === 'voip' ? 'voip_token' : 'apns_token';
-    const result = await this.pool.query<DeviceRow>(
-      `select d.id, d.user_id, d.platform, d.apns_token, d.voip_token, d.supports_callkit, d.env, d.last_seen
-       from devices d
-       join users u on d.user_id = u.id
-       where u.identity = $1
-         and d.env = $2
-         and d.${tokenColumn} is not null`,
-      [params.identity, env],
-    );
-    return result.rows;
+    const tokenFilter =
+      params.tokenType === 'voip'
+        ? { voipToken: { not: null } }
+        : { apnsToken: { not: null } };
+
+    const devices = await this.prisma.device.findMany({
+      where: {
+        user: { identity: params.identity },
+        env,
+        ...tokenFilter,
+      },
+    });
+    return devices.map(toDeviceRow);
   }
 
   async listAllByIdentity(params: { identity: string; env?: string }): Promise<DeviceRow[]> {
-    const env = params.env ?? 'production';
-    const result = await this.pool.query<DeviceRow>(
-      `select d.id, d.user_id, d.platform, d.apns_token, d.voip_token, d.supports_callkit, d.env, d.last_seen
-       from devices d
-       join users u on d.user_id = u.id
-       where u.identity = $1
-         and d.env = $2
-         and (d.apns_token is not null or d.voip_token is not null)`,
-      [params.identity, env],
-    );
-    return result.rows;
+    const devices = await this.prisma.device.findMany({
+      where: {
+        user: { identity: params.identity },
+        ...(params.env && { env: params.env }),
+        OR: [{ apnsToken: { not: null } }, { voipToken: { not: null } }],
+      },
+    });
+    return devices.map(toDeviceRow);
   }
 
   async findUserByToken(params: {
@@ -115,37 +135,53 @@ export class DeviceRepository {
     token: string;
     env?: string;
   }): Promise<(UserRow & { device_id: string }) | undefined> {
-    const tokenColumn = params.tokenType === 'voip' ? 'voip_token' : 'apns_token';
     const env = params.env ?? 'production';
-    const result = await this.pool.query<UserRow & { device_id: string }>(
-      `select u.id, u.identity, u.display_name, u.user_type, u.email, u.nickname,
-              u.profile_image_url, u.kakao_id, u.created_at, u.updated_at, d.id as device_id
-       from devices d
-       join users u on d.user_id = u.id
-       where d.${tokenColumn} = $1 and d.env = $2
-       limit 1`,
-      [params.token, env],
-    );
-    return result.rows[0];
+    const tokenFilter =
+      params.tokenType === 'voip'
+        ? { voipToken: params.token }
+        : { apnsToken: params.token };
+
+    const device = await this.prisma.device.findFirst({
+      where: {
+        ...tokenFilter,
+        env,
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    if (!device?.user) return undefined;
+    return { ...toUserRow(device.user), device_id: device.id };
   }
 
   async list(params: { tokenType: 'apns' | 'voip'; env?: string }): Promise<DeviceRow[]> {
-    const tokenColumn = params.tokenType === 'voip' ? 'voip_token' : 'apns_token';
     const env = params.env ?? 'production';
-    const result = await this.pool.query<DeviceRow>(
-      `select id, user_id, platform, apns_token, voip_token, supports_callkit, env, last_seen
-       from devices
-       where ${tokenColumn} is not null and env = $1`,
-      [env],
-    );
-    return result.rows;
+    const tokenFilter =
+      params.tokenType === 'voip'
+        ? { voipToken: { not: null } }
+        : { apnsToken: { not: null } };
+
+    const devices = await this.prisma.device.findMany({
+      where: {
+        env,
+        ...tokenFilter,
+      },
+    });
+    return devices.map(toDeviceRow);
   }
 
   async invalidateToken(tokenType: 'apns' | 'voip', token: string): Promise<void> {
-    const tokenColumn = tokenType === 'voip' ? 'voip_token' : 'apns_token';
-    await this.pool.query(
-      `update devices set ${tokenColumn} = null where ${tokenColumn} = $1`,
-      [token],
-    );
+    if (tokenType === 'voip') {
+      await this.prisma.device.updateMany({
+        where: { voipToken: token },
+        data: { voipToken: null },
+      });
+    } else {
+      await this.prisma.device.updateMany({
+        where: { apnsToken: token },
+        data: { apnsToken: null },
+      });
+    }
   }
 }

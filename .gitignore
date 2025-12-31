@@ -23,6 +23,9 @@ out/
 .turbo/
 .cache/
 
+# Prisma
+api/src/generated/
+
 # Xcode / macOS
 DerivedData/
 *.xcuserstate

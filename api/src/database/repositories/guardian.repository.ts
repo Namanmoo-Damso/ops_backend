@@ -3,64 +3,103 @@
  * guardians, guardian_ward_registrations, health_alerts, notification_settings 테이블 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
+import { PrismaService } from '../../prisma';
 import { GuardianRow, GuardianWardRegistrationRow } from '../types';
+import { toGuardianRow, toGuardianWardRegistrationRow } from '../prisma-mappers';
 
 @Injectable()
 export class GuardianRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(params: {
     userId: string;
     wardEmail: string;
     wardPhoneNumber: string;
   }): Promise<GuardianRow> {
-    const result = await this.pool.query<GuardianRow>(
-      `insert into guardians (user_id, ward_email, ward_phone_number, updated_at)
-       values ($1, $2, $3, now())
-       returning id, user_id, ward_email, ward_phone_number, created_at, updated_at`,
-      [params.userId, params.wardEmail, params.wardPhoneNumber],
-    );
-    return result.rows[0];
+    const guardian = await this.prisma.guardian.create({
+      data: {
+        userId: params.userId,
+        wardEmail: params.wardEmail,
+        wardPhoneNumber: params.wardPhoneNumber,
+      },
+    });
+    return toGuardianRow(guardian);
   }
 
   async findByUserId(userId: string): Promise<GuardianRow | undefined> {
-    const result = await this.pool.query<GuardianRow>(
-      `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
-       from guardians
-       where user_id = $1
-       limit 1`,
-      [userId],
-    );
-    return result.rows[0];
+    const guardian = await this.prisma.guardian.findUnique({
+      where: { userId },
+    });
+    return guardian ? toGuardianRow(guardian) : undefined;
   }
 
-  async findById(guardianId: string): Promise<(GuardianRow & { user_nickname: string | null; user_profile_image_url: string | null }) | undefined> {
-    const result = await this.pool.query<GuardianRow & { user_nickname: string | null; user_profile_image_url: string | null }>(
-      `select g.id, g.user_id, g.ward_email, g.ward_phone_number, g.created_at, g.updated_at,
-              u.nickname as user_nickname, u.profile_image_url as user_profile_image_url
-       from guardians g
-       join users u on g.user_id = u.id
-       where g.id = $1
-       limit 1`,
-      [guardianId],
-    );
-    return result.rows[0];
+  async findById(
+    guardianId: string,
+  ): Promise<(GuardianRow & { user_nickname: string | null; user_profile_image_url: string | null }) | undefined> {
+    const guardian = await this.prisma.guardian.findUnique({
+      where: { id: guardianId },
+      include: {
+        user: {
+          select: {
+            nickname: true,
+            profileImageUrl: true,
+          },
+        },
+      },
+    });
+    if (!guardian) return undefined;
+    return {
+      ...toGuardianRow(guardian),
+      user_nickname: guardian.user.nickname,
+      user_profile_image_url: guardian.user.profileImageUrl,
+    };
   }
 
   async findByWardEmail(wardEmail: string): Promise<GuardianRow | undefined> {
-    const result = await this.pool.query<GuardianRow>(
-      `select id, user_id, ward_email, ward_phone_number, created_at, updated_at
-       from guardians
-       where ward_email = $1
-       limit 1`,
-      [wardEmail],
-    );
-    return result.rows[0];
+    const guardian = await this.prisma.guardian.findFirst({
+      where: { wardEmail },
+    });
+    return guardian ? toGuardianRow(guardian) : undefined;
   }
 
   async getWards(guardianId: string) {
-    const result = await this.pool.query<{
+    // Primary ward from guardians table
+    const guardian = await this.prisma.guardian.findUnique({
+      where: { id: guardianId },
+      include: {
+        wards: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                nickname: true,
+                profileImageUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Additional registrations
+    const registrations = await this.prisma.guardianWardRegistration.findMany({
+      where: { guardianId },
+      include: {
+        linkedWard: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                nickname: true,
+                profileImageUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const results: Array<{
       id: string;
       ward_email: string;
       ward_phone_number: string;
@@ -70,45 +109,61 @@ export class GuardianRepository {
       ward_nickname: string | null;
       ward_profile_image_url: string | null;
       last_call_at: string | null;
-    }>(
-      `-- Primary registration from guardians table
-       select
-         g.id,
-         g.ward_email,
-         g.ward_phone_number,
-         true as is_primary,
-         w.id as linked_ward_id,
-         w.user_id as ward_user_id,
-         u.nickname as ward_nickname,
-         u.profile_image_url as ward_profile_image_url,
-         (select max(c.created_at) from calls c where c.callee_user_id = w.user_id) as last_call_at
-       from guardians g
-       left join wards w on w.guardian_id = g.id
-       left join users u on w.user_id = u.id
-       where g.id = $1
+    }> = [];
 
-       union all
+    // Add primary ward
+    if (guardian) {
+      const primaryWard = guardian.wards[0];
+      // Get last call for primary ward
+      let lastCallAt: string | null = null;
+      if (primaryWard) {
+        const lastCall = await this.prisma.call.findFirst({
+          where: { calleeUserId: primaryWard.userId },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        });
+        lastCallAt = lastCall?.createdAt.toISOString() ?? null;
+      }
 
-       -- Additional registrations from guardian_ward_registrations table
-       select
-         gwr.id,
-         gwr.ward_email,
-         gwr.ward_phone_number,
-         false as is_primary,
-         gwr.linked_ward_id,
-         w.user_id as ward_user_id,
-         u.nickname as ward_nickname,
-         u.profile_image_url as ward_profile_image_url,
-         (select max(c.created_at) from calls c where c.callee_user_id = w.user_id) as last_call_at
-       from guardian_ward_registrations gwr
-       left join wards w on gwr.linked_ward_id = w.id
-       left join users u on w.user_id = u.id
-       where gwr.guardian_id = $1
+      results.push({
+        id: guardian.id,
+        ward_email: guardian.wardEmail,
+        ward_phone_number: guardian.wardPhoneNumber,
+        is_primary: true,
+        linked_ward_id: primaryWard?.id ?? null,
+        ward_user_id: primaryWard?.userId ?? null,
+        ward_nickname: primaryWard?.user.nickname ?? null,
+        ward_profile_image_url: primaryWard?.user.profileImageUrl ?? null,
+        last_call_at: lastCallAt,
+      });
+    }
 
-       order by is_primary desc, ward_email`,
-      [guardianId],
-    );
-    return result.rows;
+    // Add additional registrations
+    for (const reg of registrations) {
+      let lastCallAt: string | null = null;
+      if (reg.linkedWard) {
+        const lastCall = await this.prisma.call.findFirst({
+          where: { calleeUserId: reg.linkedWard.userId },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        });
+        lastCallAt = lastCall?.createdAt.toISOString() ?? null;
+      }
+
+      results.push({
+        id: reg.id,
+        ward_email: reg.wardEmail,
+        ward_phone_number: reg.wardPhoneNumber,
+        is_primary: false,
+        linked_ward_id: reg.linkedWardId,
+        ward_user_id: reg.linkedWard?.userId ?? null,
+        ward_nickname: reg.linkedWard?.user.nickname ?? null,
+        ward_profile_image_url: reg.linkedWard?.user.profileImageUrl ?? null,
+        last_call_at: lastCallAt,
+      });
+    }
+
+    return results;
   }
 
   async createWardRegistration(params: {
@@ -116,24 +171,21 @@ export class GuardianRepository {
     wardEmail: string;
     wardPhoneNumber: string;
   }): Promise<GuardianWardRegistrationRow> {
-    const result = await this.pool.query<GuardianWardRegistrationRow>(
-      `insert into guardian_ward_registrations (guardian_id, ward_email, ward_phone_number, updated_at)
-       values ($1, $2, $3, now())
-       returning id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at`,
-      [params.guardianId, params.wardEmail, params.wardPhoneNumber],
-    );
-    return result.rows[0];
+    const registration = await this.prisma.guardianWardRegistration.create({
+      data: {
+        guardianId: params.guardianId,
+        wardEmail: params.wardEmail,
+        wardPhoneNumber: params.wardPhoneNumber,
+      },
+    });
+    return toGuardianWardRegistrationRow(registration);
   }
 
   async findWardRegistration(id: string, guardianId: string): Promise<GuardianWardRegistrationRow | undefined> {
-    const result = await this.pool.query<GuardianWardRegistrationRow>(
-      `select id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at
-       from guardian_ward_registrations
-       where id = $1 and guardian_id = $2
-       limit 1`,
-      [id, guardianId],
-    );
-    return result.rows[0];
+    const registration = await this.prisma.guardianWardRegistration.findFirst({
+      where: { id, guardianId },
+    });
+    return registration ? toGuardianWardRegistrationRow(registration) : undefined;
   }
 
   async updateWardRegistration(params: {
@@ -142,34 +194,43 @@ export class GuardianRepository {
     wardEmail: string;
     wardPhoneNumber: string;
   }): Promise<GuardianWardRegistrationRow | undefined> {
-    const result = await this.pool.query<GuardianWardRegistrationRow>(
-      `update guardian_ward_registrations
-       set ward_email = $3, ward_phone_number = $4, updated_at = now()
-       where id = $1 and guardian_id = $2
-       returning id, guardian_id, ward_email, ward_phone_number, linked_ward_id, created_at, updated_at`,
-      [params.id, params.guardianId, params.wardEmail, params.wardPhoneNumber],
-    );
-    return result.rows[0];
+    try {
+      const registration = await this.prisma.guardianWardRegistration.update({
+        where: { id: params.id },
+        data: {
+          wardEmail: params.wardEmail,
+          wardPhoneNumber: params.wardPhoneNumber,
+        },
+      });
+      // Verify guardianId matches
+      if (registration.guardianId !== params.guardianId) {
+        return undefined;
+      }
+      return toGuardianWardRegistrationRow(registration);
+    } catch {
+      return undefined;
+    }
   }
 
   async deleteWardRegistration(id: string, guardianId: string): Promise<boolean> {
-    await this.pool.query(
-      `update wards
-       set guardian_id = null
-       where id = (
-         select linked_ward_id from guardian_ward_registrations
-         where id = $1 and guardian_id = $2
-       )`,
-      [id, guardianId],
-    );
+    // First unlink the ward
+    const registration = await this.prisma.guardianWardRegistration.findFirst({
+      where: { id, guardianId },
+    });
 
-    const result = await this.pool.query(
-      `delete from guardian_ward_registrations
-       where id = $1 and guardian_id = $2
-       returning id`,
-      [id, guardianId],
-    );
-    return (result.rowCount ?? 0) > 0;
+    if (!registration) return false;
+
+    if (registration.linkedWardId) {
+      await this.prisma.ward.update({
+        where: { id: registration.linkedWardId },
+        data: { guardianId: null },
+      });
+    }
+
+    const result = await this.prisma.guardianWardRegistration.deleteMany({
+      where: { id, guardianId },
+    });
+    return result.count > 0;
   }
 
   async updatePrimaryWard(params: {
@@ -177,46 +238,39 @@ export class GuardianRepository {
     wardEmail: string;
     wardPhoneNumber: string;
   }): Promise<GuardianRow | undefined> {
-    const result = await this.pool.query<GuardianRow>(
-      `update guardians
-       set ward_email = $2, ward_phone_number = $3, updated_at = now()
-       where id = $1
-       returning id, user_id, ward_email, ward_phone_number, created_at, updated_at`,
-      [params.guardianId, params.wardEmail, params.wardPhoneNumber],
-    );
-    return result.rows[0];
+    try {
+      const guardian = await this.prisma.guardian.update({
+        where: { id: params.guardianId },
+        data: {
+          wardEmail: params.wardEmail,
+          wardPhoneNumber: params.wardPhoneNumber,
+        },
+      });
+      return toGuardianRow(guardian);
+    } catch {
+      return undefined;
+    }
   }
 
   async unlinkPrimaryWard(guardianId: string): Promise<void> {
-    await this.pool.query(
-      `update wards
-       set guardian_id = null
-       where guardian_id = $1`,
-      [guardianId],
-    );
+    await this.prisma.ward.updateMany({
+      where: { guardianId },
+      data: { guardianId: null },
+    });
   }
 
   async getHealthAlerts(guardianId: string, limit: number = 5) {
-    const result = await this.pool.query<{
-      id: string;
-      alert_type: string;
-      message: string;
-      is_read: boolean;
-      created_at: string;
-    }>(
-      `select id, alert_type, message, is_read, created_at
-       from health_alerts
-       where guardian_id = $1
-       order by created_at desc
-       limit $2`,
-      [guardianId, limit],
-    );
-    return result.rows.map((row) => ({
-      id: row.id,
-      type: row.alert_type,
-      message: row.message,
-      date: row.created_at.split('T')[0],
-      isRead: row.is_read,
+    const alerts = await this.prisma.healthAlert.findMany({
+      where: { guardianId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    return alerts.map((alert) => ({
+      id: alert.id,
+      type: alert.alertType,
+      message: alert.message,
+      date: alert.createdAt.toISOString().split('T')[0],
+      isRead: alert.isRead,
     }));
   }
 
@@ -226,29 +280,27 @@ export class GuardianRepository {
     alertType: 'warning' | 'info';
     message: string;
   }): Promise<{ id: string }> {
-    const result = await this.pool.query<{ id: string }>(
-      `insert into health_alerts (ward_id, guardian_id, alert_type, message)
-       values ($1, $2, $3, $4)
-       returning id`,
-      [params.wardId, params.guardianId, params.alertType, params.message],
-    );
-    return result.rows[0];
+    const alert = await this.prisma.healthAlert.create({
+      data: {
+        wardId: params.wardId,
+        guardianId: params.guardianId,
+        alertType: params.alertType,
+        message: params.message,
+      },
+    });
+    return { id: alert.id };
   }
 
   async getNotificationSettings(userId: string) {
-    const result = await this.pool.query<{
-      call_reminder: boolean;
-      call_complete: boolean;
-      health_alert: boolean;
-    }>(
-      `select call_reminder, call_complete, health_alert
-       from notification_settings
-       where user_id = $1
-       limit 1`,
-      [userId],
-    );
-    if (result.rows[0]) {
-      return result.rows[0];
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { userId },
+    });
+    if (settings) {
+      return {
+        call_reminder: settings.callReminder,
+        call_complete: settings.callComplete,
+        health_alert: settings.healthAlert,
+      };
     }
     return {
       call_reminder: true,
@@ -258,18 +310,14 @@ export class GuardianRepository {
   }
 
   async getGuardianNotificationSettings(guardianUserId: string) {
-    const result = await this.pool.query<{
-      call_complete: boolean;
-      health_alert: boolean;
-    }>(
-      `select call_complete, health_alert
-       from notification_settings
-       where user_id = $1
-       limit 1`,
-      [guardianUserId],
-    );
-    if (result.rows[0]) {
-      return result.rows[0];
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { userId: guardianUserId },
+    });
+    if (settings) {
+      return {
+        call_complete: settings.callComplete,
+        health_alert: settings.healthAlert,
+      };
     }
     return { call_complete: true, health_alert: true };
   }
@@ -280,21 +328,24 @@ export class GuardianRepository {
     callComplete?: boolean;
     healthAlert?: boolean;
   }) {
-    const result = await this.pool.query<{
-      call_reminder: boolean;
-      call_complete: boolean;
-      health_alert: boolean;
-    }>(
-      `insert into notification_settings (user_id, call_reminder, call_complete, health_alert)
-       values ($1, coalesce($2, true), coalesce($3, true), coalesce($4, true))
-       on conflict (user_id) do update set
-         call_reminder = coalesce($2, notification_settings.call_reminder),
-         call_complete = coalesce($3, notification_settings.call_complete),
-         health_alert = coalesce($4, notification_settings.health_alert),
-         updated_at = now()
-       returning call_reminder, call_complete, health_alert`,
-      [params.userId, params.callReminder, params.callComplete, params.healthAlert],
-    );
-    return result.rows[0];
+    const settings = await this.prisma.notificationSettings.upsert({
+      where: { userId: params.userId },
+      update: {
+        callReminder: params.callReminder,
+        callComplete: params.callComplete,
+        healthAlert: params.healthAlert,
+      },
+      create: {
+        userId: params.userId,
+        callReminder: params.callReminder ?? true,
+        callComplete: params.callComplete ?? true,
+        healthAlert: params.healthAlert ?? true,
+      },
+    });
+    return {
+      call_reminder: settings.callReminder,
+      call_complete: settings.callComplete,
+      health_alert: settings.healthAlert,
+    };
   }
 }

@@ -3,7 +3,7 @@
  * admins, admin_permissions, admin_refresh_tokens, organizations 테이블 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
+import { PrismaService } from '../../prisma';
 
 type AdminResult = {
   id: string;
@@ -20,30 +20,53 @@ type AdminResult = {
 
 @Injectable()
 export class AdminRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
+
+  private toAdminResult(admin: {
+    id: string;
+    email: string;
+    name: string | null;
+    provider: string;
+    providerId: string;
+    role: string;
+    organizationId: string | null;
+    isActive: boolean;
+    lastLoginAt: Date | null;
+    createdAt: Date;
+  }): AdminResult {
+    return {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      provider: admin.provider,
+      provider_id: admin.providerId,
+      role: admin.role,
+      organization_id: admin.organizationId,
+      is_active: admin.isActive,
+      last_login_at: admin.lastLoginAt?.toISOString() ?? null,
+      created_at: admin.createdAt.toISOString(),
+    };
+  }
 
   async findByProviderId(provider: string, providerId: string): Promise<AdminResult | null> {
-    const result = await this.pool.query<AdminResult>(
-      `select * from admins where provider = $1 and provider_id = $2`,
-      [provider, providerId],
-    );
-    return result.rows[0] || null;
+    const admin = await this.prisma.admin.findUnique({
+      where: { provider_providerId: { provider, providerId } },
+    });
+    return admin ? this.toAdminResult(admin) : null;
   }
 
   async findByEmail(email: string): Promise<AdminResult | null> {
-    const result = await this.pool.query<AdminResult>(
-      `select * from admins where email = $1`,
-      [email],
-    );
-    return result.rows[0] || null;
+    const admin = await this.prisma.admin.findUnique({
+      where: { email },
+    });
+    return admin ? this.toAdminResult(admin) : null;
   }
 
   async findById(adminId: string): Promise<AdminResult | null> {
-    const result = await this.pool.query<AdminResult>(
-      `select * from admins where id = $1`,
-      [adminId],
-    );
-    return result.rows[0] || null;
+    const admin = await this.prisma.admin.findUnique({
+      where: { id: adminId },
+    });
+    return admin ? this.toAdminResult(admin) : null;
   }
 
   async create(params: {
@@ -54,51 +77,43 @@ export class AdminRepository {
     role?: string;
     organizationId?: string;
   }): Promise<{ id: string }> {
-    const countResult = await this.pool.query<{ count: string }>(
-      `select count(*) as count from admins`,
-    );
-    const isFirstAdmin = parseInt(countResult.rows[0].count, 10) === 0;
+    const count = await this.prisma.admin.count();
+    const isFirstAdmin = count === 0;
     const role = isFirstAdmin ? 'super_admin' : (params.role || 'admin');
 
-    const result = await this.pool.query<{ id: string }>(
-      `insert into admins (email, name, provider, provider_id, role, organization_id)
-       values ($1, $2, $3, $4, $5, $6)
-       returning id`,
-      [
-        params.email,
-        params.name || null,
-        params.provider,
-        params.providerId,
+    const admin = await this.prisma.admin.create({
+      data: {
+        email: params.email,
+        name: params.name ?? null,
+        provider: params.provider,
+        providerId: params.providerId,
         role,
-        params.organizationId || null,
-      ],
-    );
-    return result.rows[0];
+        organizationId: params.organizationId ?? null,
+      },
+    });
+    return { id: admin.id };
   }
 
   async updateLastLogin(adminId: string): Promise<void> {
-    await this.pool.query(
-      `update admins set last_login_at = now(), updated_at = now() where id = $1`,
-      [adminId],
-    );
+    await this.prisma.admin.update({
+      where: { id: adminId },
+      data: { lastLoginAt: new Date() },
+    });
   }
 
   async getPermissions(adminId: string): Promise<string[]> {
-    const result = await this.pool.query<{ permission: string }>(
-      `select permission from admin_permissions where admin_id = $1`,
-      [adminId],
-    );
-    return result.rows.map((r) => r.permission);
+    const permissions = await this.prisma.adminPermission.findMany({
+      where: { adminId },
+      select: { permission: true },
+    });
+    return permissions.map((p) => p.permission);
   }
 
   async createRefreshToken(adminId: string, tokenHash: string, expiresAt: Date): Promise<{ id: string }> {
-    const result = await this.pool.query<{ id: string }>(
-      `insert into admin_refresh_tokens (admin_id, token_hash, expires_at)
-       values ($1, $2, $3)
-       returning id`,
-      [adminId, tokenHash, expiresAt],
-    );
-    return result.rows[0];
+    const token = await this.prisma.adminRefreshToken.create({
+      data: { adminId, tokenHash, expiresAt },
+    });
+    return { id: token.id };
   }
 
   async findRefreshToken(tokenHash: string): Promise<{
@@ -106,110 +121,114 @@ export class AdminRepository {
     admin_id: string;
     expires_at: string;
   } | null> {
-    const result = await this.pool.query<{
-      id: string;
-      admin_id: string;
-      expires_at: string;
-    }>(
-      `select id, admin_id, expires_at from admin_refresh_tokens
-       where token_hash = $1 and expires_at > now()`,
-      [tokenHash],
-    );
-    return result.rows[0] || null;
+    const token = await this.prisma.adminRefreshToken.findUnique({
+      where: { tokenHash },
+    });
+    if (!token || token.expiresAt <= new Date()) return null;
+    return {
+      id: token.id,
+      admin_id: token.adminId,
+      expires_at: token.expiresAt.toISOString(),
+    };
   }
 
   async deleteRefreshToken(tokenHash: string): Promise<void> {
-    await this.pool.query(
-      `delete from admin_refresh_tokens where token_hash = $1`,
-      [tokenHash],
-    );
+    await this.prisma.adminRefreshToken.deleteMany({
+      where: { tokenHash },
+    });
   }
 
   async deleteAllRefreshTokens(adminId: string): Promise<void> {
-    await this.pool.query(
-      `delete from admin_refresh_tokens where admin_id = $1`,
-      [adminId],
-    );
+    await this.prisma.adminRefreshToken.deleteMany({
+      where: { adminId },
+    });
   }
 
   async getAll() {
-    const result = await this.pool.query<AdminResult & { organization_name: string | null }>(
-      `select a.*, o.name as organization_name
-       from admins a
-       left join organizations o on a.organization_id = o.id
-       order by a.created_at desc`,
-    );
-    return result.rows;
+    const admins = await this.prisma.admin.findMany({
+      include: {
+        organization: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return admins.map((a) => ({
+      ...this.toAdminResult(a),
+      organization_name: a.organization?.name ?? null,
+    }));
   }
 
   async updateRole(adminId: string, role: string, organizationId?: string): Promise<void> {
-    await this.pool.query(
-      `update admins set role = $1, organization_id = $2, updated_at = now() where id = $3`,
-      [role, organizationId || null, adminId],
-    );
+    await this.prisma.admin.update({
+      where: { id: adminId },
+      data: { role, organizationId: organizationId ?? null },
+    });
   }
 
   async updateActiveStatus(adminId: string, isActive: boolean): Promise<void> {
-    await this.pool.query(
-      `update admins set is_active = $1, updated_at = now() where id = $2`,
-      [isActive, adminId],
-    );
+    await this.prisma.admin.update({
+      where: { id: adminId },
+      data: { isActive },
+    });
   }
 
   async updateOrganization(adminId: string, organizationId: string): Promise<void> {
-    await this.pool.query(
-      `update admins set organization_id = $1, updated_at = now() where id = $2`,
-      [organizationId, adminId],
-    );
+    await this.prisma.admin.update({
+      where: { id: adminId },
+      data: { organizationId },
+    });
   }
 
   // Organization methods
   async findOrganization(organizationId: string) {
-    const result = await this.pool.query<{
-      id: string;
-      name: string;
-      created_at: string;
-    }>(
-      `select id, name, created_at from organizations where id = $1`,
-      [organizationId],
-    );
-    return result.rows[0];
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+    });
+    if (!org) return undefined;
+    return {
+      id: org.id,
+      name: org.name,
+      created_at: org.createdAt.toISOString(),
+    };
   }
 
   async listAllOrganizations() {
-    const result = await this.pool.query<{
-      id: string;
-      name: string;
-      created_at: string;
-    }>(
-      `select id, name, created_at from organizations order by name`,
-    );
-    return result.rows;
+    const orgs = await this.prisma.organization.findMany({
+      orderBy: { name: 'asc' },
+    });
+    return orgs.map((o) => ({
+      id: o.id,
+      name: o.name,
+      created_at: o.createdAt.toISOString(),
+    }));
   }
 
   async findOrCreateOrganization(name: string) {
-    const existing = await this.pool.query<{
-      id: string;
-      name: string;
-      created_at: string;
-    }>(
-      `select id, name, created_at from organizations where name = $1`,
-      [name],
-    );
+    const existing = await this.prisma.organization.findFirst({
+      where: { name },
+    });
 
-    if (existing.rows[0]) {
-      return { organization: existing.rows[0], created: false };
+    if (existing) {
+      return {
+        organization: {
+          id: existing.id,
+          name: existing.name,
+          created_at: existing.createdAt.toISOString(),
+        },
+        created: false,
+      };
     }
 
-    const result = await this.pool.query<{
-      id: string;
-      name: string;
-      created_at: string;
-    }>(
-      `insert into organizations (name) values ($1) returning id, name, created_at`,
-      [name],
-    );
+    const org = await this.prisma.organization.create({
+      data: { name },
+    });
 
-    return { organization: result.rows[0], created: true };
+    return {
+      organization: {
+        id: org.id,
+        name: org.name,
+        created_at: org.createdAt.toISOString(),
+      },
+      created: true,
+    };
   }
 }

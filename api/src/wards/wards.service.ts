@@ -94,7 +94,7 @@ export class WardsService {
       wardId: ward.id,
       latitude: location.latitude,
       longitude: location.longitude,
-      accuracy: location.accuracy,
+      accuracy: location.accuracy ?? null,
     });
 
     // 위치 기록 저장
@@ -132,7 +132,7 @@ export class WardsService {
         wardId: ward.id,
         latitude: emergency.latitude,
         longitude: emergency.longitude,
-        accuracy: emergency.accuracy,
+        accuracy: emergency.accuracy ?? null,
       });
     }
 

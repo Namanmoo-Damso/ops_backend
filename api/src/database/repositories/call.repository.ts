@@ -3,44 +3,31 @@
  * calls, call_summaries 테이블 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
-
-type CallResult = {
-  call_id: string;
-  state: string;
-  created_at: string;
-  answered_at?: string | null;
-  ended_at?: string | null;
-};
-
-type CallSummaryRow = {
-  id: string;
-  call_id: string;
-  ward_id: string | null;
-  summary: string;
-  mood: string;
-  mood_score: number;
-  tags: string[];
-  health_keywords: Record<string, unknown>;
-  created_at: string;
-};
+import { PrismaService } from '../../prisma';
+import { Prisma } from '../../generated/prisma';
+import { CallRow, CallSummaryRow } from '../types';
+import { toCallRow, toCallSummaryRow } from '../prisma-mappers';
 
 @Injectable()
 export class CallRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async findRinging(calleeIdentity: string, roomName: string, seconds: number): Promise<{ call_id: string } | undefined> {
-    const result = await this.pool.query<{ call_id: string }>(
-      `select call_id
-       from calls
-       where callee_identity = $1
-         and room_name = $2
-         and state = 'ringing'
-         and created_at > now() - ($3 || ' seconds')::interval
-       limit 1`,
-      [calleeIdentity, roomName, seconds.toString()],
-    );
-    return result.rows[0];
+  async findRinging(
+    calleeIdentity: string,
+    roomName: string,
+    seconds: number,
+  ): Promise<{ callId: string } | null> {
+    const cutoff = new Date(Date.now() - seconds * 1000);
+    const call = await this.prisma.call.findFirst({
+      where: {
+        calleeIdentity,
+        roomName,
+        state: 'ringing',
+        createdAt: { gt: cutoff },
+      },
+      select: { callId: true },
+    });
+    return call;
   }
 
   async create(params: {
@@ -49,163 +36,199 @@ export class CallRepository {
     callerUserId?: string;
     calleeUserId?: string;
     roomName: string;
-  }): Promise<CallResult> {
-    const result = await this.pool.query<CallResult>(
-      `insert into calls (caller_user_id, callee_user_id, caller_identity, callee_identity, room_name, state)
-       values ($1, $2, $3, $4, $5, 'ringing')
-       returning call_id, state, created_at`,
-      [
-        params.callerUserId ?? null,
-        params.calleeUserId ?? null,
-        params.callerIdentity,
-        params.calleeIdentity,
-        params.roomName,
-      ],
-    );
-    return result.rows[0];
+  }): Promise<CallRow> {
+    const call = await this.prisma.call.create({
+      data: {
+        callerUserId: params.callerUserId ?? null,
+        calleeUserId: params.calleeUserId ?? null,
+        callerIdentity: params.callerIdentity,
+        calleeIdentity: params.calleeIdentity,
+        roomName: params.roomName,
+        state: 'ringing',
+      },
+    });
+    return toCallRow(call);
   }
 
-  async updateState(callId: string, state: 'answered' | 'ended'): Promise<CallResult | undefined> {
-    const timestampColumn = state === 'answered' ? 'answered_at' : 'ended_at';
-    const result = await this.pool.query<CallResult>(
-      `update calls
-       set state = $2, ${timestampColumn} = now()
-       where call_id = $1
-       returning call_id, state, answered_at, ended_at`,
-      [callId, state],
-    );
-    return result.rows[0];
+  async updateState(callId: string, state: 'answered' | 'ended'): Promise<CallRow | null> {
+    const data: Prisma.CallUpdateInput =
+      state === 'answered'
+        ? { state, answeredAt: new Date() }
+        : { state, endedAt: new Date() };
+
+    const call = await this.prisma.call.update({
+      where: { callId },
+      data,
+    });
+    return call ? toCallRow(call) : null;
   }
 
   async getRecentSummaries(wardId: string, limit: number = 5) {
-    const result = await this.pool.query<{
-      id: string;
-      call_id: string;
-      summary: string | null;
-      mood: string | null;
-      tags: string[] | null;
-      created_at: string;
-      call_duration: string | null;
-    }>(
-      `select
-        cs.id, cs.call_id, cs.summary, cs.mood, cs.tags, cs.created_at,
-        extract(epoch from (c.ended_at - c.answered_at))/60 as call_duration
-       from call_summaries cs
-       left join calls c on cs.call_id = c.call_id
-       where cs.ward_id = $1
-       order by cs.created_at desc
-       limit $2`,
-      [wardId, limit],
-    );
-    return result.rows.map((row) => ({
-      id: row.id,
-      date: row.created_at,
-      duration: Math.round(parseFloat(row.call_duration || '0')),
-      summary: row.summary || '',
-      tags: row.tags || [],
-      mood: row.mood || 'neutral',
-    }));
+    const summaries = await this.prisma.callSummary.findMany({
+      where: { wardId },
+      include: {
+        call: {
+          select: {
+            answeredAt: true,
+            endedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    return summaries.map((s) => {
+      const duration =
+        s.call.answeredAt && s.call.endedAt
+          ? Math.round((s.call.endedAt.getTime() - s.call.answeredAt.getTime()) / 60000)
+          : 0;
+      return {
+        id: s.id,
+        date: s.createdAt.toISOString(),
+        duration,
+        summary: s.summary || '',
+        tags: s.tags || [],
+        mood: s.mood || 'neutral',
+      };
+    });
   }
 
   async getSummariesForReport(wardId: string, days: number) {
-    const result = await this.pool.query<{
-      summary: string | null;
-      mood: string | null;
-      health_keywords: Record<string, unknown> | null;
-    }>(
-      `select summary, mood, health_keywords
-       from call_summaries
-       where ward_id = $1
-         and created_at >= now() - ($2 || ' days')::interval
-       order by created_at desc`,
-      [wardId, days.toString()],
-    );
-    return result.rows;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    return this.prisma.callSummary.findMany({
+      where: {
+        wardId,
+        createdAt: { gte: cutoff },
+      },
+      select: {
+        summary: true,
+        mood: true,
+        healthKeywords: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async getMissed(hoursAgo: number = 1) {
-    const result = await this.pool.query<{
+    const cutoff = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+    const now = new Date();
+    const checkTime = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
+    const dayOfWeek = checkTime.getDay();
+
+    const schedules = await this.prisma.callSchedule.findMany({
+      where: {
+        dayOfWeek,
+        isActive: true,
+        lastCalledAt: { lt: cutoff },
+      },
+      include: {
+        ward: {
+          include: {
+            user: true,
+            guardian: {
+              include: {
+                user: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const results: Array<{
       ward_id: string;
       ward_identity: string;
       guardian_identity: string;
       guardian_user_id: string;
-    }>(
-      `select
-        w.id as ward_id,
-        u.identity as ward_identity,
-        gu.identity as guardian_identity,
-        g.user_id as guardian_user_id
-       from call_schedules cs
-       join wards w on cs.ward_id = w.id
-       join users u on w.user_id = u.id
-       join guardians g on w.guardian_id = g.id
-       join users gu on g.user_id = gu.id
-       where cs.day_of_week = extract(dow from now() - ($1 || ' hours')::interval)::int
-         and cs.is_active = true
-         and cs.last_called_at < now() - ($1 || ' hours')::interval
-         and not exists (
-           select 1 from calls c
-           where c.callee_user_id = w.user_id
-             and c.state = 'ended'
-             and c.created_at > now() - ($1 || ' hours')::interval
-         )`,
-      [hoursAgo.toString()],
-    );
-    return result.rows;
+    }> = [];
+
+    for (const schedule of schedules) {
+      if (!schedule.ward.guardian?.user) continue;
+
+      // Check if there's a recent ended call
+      const recentCall = await this.prisma.call.findFirst({
+        where: {
+          calleeUserId: schedule.ward.userId,
+          state: 'ended',
+          createdAt: { gt: cutoff },
+        },
+      });
+
+      if (!recentCall) {
+        results.push({
+          ward_id: schedule.ward.id,
+          ward_identity: schedule.ward.user.identity,
+          guardian_identity: schedule.ward.guardian.user.identity,
+          guardian_user_id: schedule.ward.guardian.userId,
+        });
+      }
+    }
+
+    return results;
   }
 
   async getWithWardInfo(callId: string) {
-    const result = await this.pool.query<{
-      call_id: string;
-      callee_user_id: string | null;
-      callee_identity: string;
-      ward_id: string | null;
-      ward_ai_persona: string | null;
-      guardian_id: string | null;
-      guardian_user_id: string | null;
-      guardian_identity: string | null;
-    }>(
-      `select
-        c.call_id,
-        c.callee_user_id,
-        c.callee_identity,
-        w.id as ward_id,
-        w.ai_persona as ward_ai_persona,
-        w.guardian_id,
-        g.user_id as guardian_user_id,
-        gu.identity as guardian_identity
-       from calls c
-       left join wards w on c.callee_user_id = w.user_id
-       left join guardians g on w.guardian_id = g.id
-       left join users gu on g.user_id = gu.id
-       where c.call_id = $1`,
-      [callId],
-    );
-    return result.rows[0];
+    const call = await this.prisma.call.findUnique({
+      where: { callId },
+      include: {
+        callee: {
+          include: {
+            ward: {
+              include: {
+                guardian: {
+                  include: {
+                    user: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!call) return undefined;
+
+    return {
+      call_id: call.callId,
+      callee_user_id: call.calleeUserId,
+      callee_identity: call.calleeIdentity,
+      ward_id: call.callee?.ward?.id ?? null,
+      ward_ai_persona: call.callee?.ward?.aiPersona ?? null,
+      guardian_id: call.callee?.ward?.guardianId ?? null,
+      guardian_user_id: call.callee?.ward?.guardian?.userId ?? null,
+      guardian_identity: call.callee?.ward?.guardian?.user?.identity ?? null,
+    };
   }
 
   async getForAnalysis(callId: string) {
-    const result = await this.pool.query<{
-      call_id: string;
-      callee_user_id: string | null;
-      ward_id: string | null;
-      guardian_id: string | null;
-      duration: number | null;
-      transcript: string | null;
-    }>(
-      `select
-        c.call_id,
-        c.callee_user_id,
-        w.id as ward_id,
-        w.guardian_id,
-        extract(epoch from (c.ended_at - c.answered_at))/60 as duration,
-        null as transcript
-       from calls c
-       left join wards w on c.callee_user_id = w.user_id
-       where c.call_id = $1`,
-      [callId],
-    );
-    return result.rows[0];
+    const call = await this.prisma.call.findUnique({
+      where: { callId },
+      include: {
+        callee: {
+          include: {
+            ward: true,
+          },
+        },
+      },
+    });
+
+    if (!call) return undefined;
+
+    const duration =
+      call.answeredAt && call.endedAt
+        ? (call.endedAt.getTime() - call.answeredAt.getTime()) / 60000
+        : null;
+
+    return {
+      call_id: call.callId,
+      callee_user_id: call.calleeUserId,
+      ward_id: call.callee?.ward?.id ?? null,
+      guardian_id: call.callee?.ward?.guardianId ?? null,
+      duration,
+      transcript: null as string | null,
+    };
   }
 
   async createSummary(params: {
@@ -217,44 +240,41 @@ export class CallRepository {
     tags: string[];
     healthKeywords: Record<string, unknown>;
   }): Promise<CallSummaryRow> {
-    const result = await this.pool.query<CallSummaryRow>(
-      `insert into call_summaries (call_id, ward_id, summary, mood, mood_score, tags, health_keywords)
-       values ($1, $2, $3, $4, $5, $6, $7)
-       returning id, call_id, ward_id, summary, mood, mood_score, tags, health_keywords, created_at`,
-      [
-        params.callId,
-        params.wardId,
-        params.summary,
-        params.mood,
-        params.moodScore,
-        params.tags,
-        JSON.stringify(params.healthKeywords),
-      ],
-    );
-    return result.rows[0];
+    const summary = await this.prisma.callSummary.create({
+      data: {
+        callId: params.callId,
+        wardId: params.wardId!,
+        summary: params.summary,
+        mood: params.mood,
+        moodScore: new Prisma.Decimal(params.moodScore),
+        tags: params.tags,
+        healthKeywords: params.healthKeywords as Prisma.InputJsonValue,
+      },
+    });
+    return toCallSummaryRow(summary);
   }
 
   async getRecentPainMentions(wardId: string, days: number): Promise<number> {
-    const result = await this.pool.query<{ count: string }>(
-      `select count(*) as count
-       from call_summaries
-       where ward_id = $1
-         and created_at > now() - ($2 || ' days')::interval
-         and (health_keywords->>'pain')::int > 0`,
-      [wardId, days.toString()],
-    );
-    return parseInt(result.rows[0]?.count || '0', 10);
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const summaries = await this.prisma.callSummary.findMany({
+      where: {
+        wardId,
+        createdAt: { gt: cutoff },
+      },
+      select: { healthKeywords: true },
+    });
+
+    return summaries.filter((s) => {
+      const keywords = s.healthKeywords as Record<string, unknown> | null;
+      return keywords && typeof keywords.pain === 'number' && keywords.pain > 0;
+    }).length;
   }
 
-  async getSummary(callId: string): Promise<CallSummaryRow | undefined> {
-    const result = await this.pool.query<CallSummaryRow>(
-      `select id, call_id, ward_id, summary, mood, mood_score, tags, health_keywords, created_at
-       from call_summaries
-       where call_id = $1
-       order by created_at desc
-       limit 1`,
-      [callId],
-    );
-    return result.rows[0];
+  async getSummary(callId: string): Promise<CallSummaryRow | null> {
+    const summary = await this.prisma.callSummary.findFirst({
+      where: { callId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return summary ? toCallSummaryRow(summary) : null;
   }
 }

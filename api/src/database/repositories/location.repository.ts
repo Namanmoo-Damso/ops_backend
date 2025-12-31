@@ -3,11 +3,12 @@
  * ward_locations, ward_current_locations 테이블 관련 메서드
  */
 import { Injectable } from '@nestjs/common';
-import { Pool } from 'pg';
+import { PrismaService } from '../../prisma';
+import { Prisma } from '../../generated/prisma';
 
 @Injectable()
 export class LocationRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async createWardLocation(params: {
     wardId: string;
@@ -16,27 +17,24 @@ export class LocationRepository {
     accuracy: number | null;
     recordedAt: Date;
   }) {
-    const result = await this.pool.query<{
-      id: string;
-      ward_id: string;
-      latitude: string;
-      longitude: string;
-      accuracy: string | null;
-      recorded_at: string;
-      created_at: string;
-    }>(
-      `insert into ward_locations (ward_id, latitude, longitude, accuracy, recorded_at)
-       values ($1, $2, $3, $4, $5)
-       returning id, ward_id, latitude, longitude, accuracy, recorded_at, created_at`,
-      [
-        params.wardId,
-        params.latitude,
-        params.longitude,
-        params.accuracy,
-        params.recordedAt.toISOString(),
-      ],
-    );
-    return result.rows[0];
+    const location = await this.prisma.wardLocation.create({
+      data: {
+        wardId: params.wardId,
+        latitude: new Prisma.Decimal(params.latitude),
+        longitude: new Prisma.Decimal(params.longitude),
+        accuracy: params.accuracy ? new Prisma.Decimal(params.accuracy) : null,
+        recordedAt: params.recordedAt,
+      },
+    });
+    return {
+      id: location.id,
+      ward_id: location.wardId,
+      latitude: location.latitude.toString(),
+      longitude: location.longitude.toString(),
+      accuracy: location.accuracy?.toString() ?? null,
+      recorded_at: location.recordedAt.toISOString(),
+      created_at: location.createdAt.toISOString(),
+    };
   }
 
   async upsertCurrentLocation(params: {
@@ -47,133 +45,111 @@ export class LocationRepository {
     status?: 'normal' | 'warning' | 'emergency';
   }) {
     const status = params.status || 'normal';
-    const result = await this.pool.query<{
-      ward_id: string;
-      latitude: string;
-      longitude: string;
-      accuracy: string | null;
-      status: string;
-      last_updated: string;
-    }>(
-      `insert into ward_current_locations (ward_id, latitude, longitude, accuracy, status, last_updated)
-       values ($1, $2, $3, $4, $5, now())
-       on conflict (ward_id)
-       do update set
-         latitude = excluded.latitude,
-         longitude = excluded.longitude,
-         accuracy = excluded.accuracy,
-         status = excluded.status,
-         last_updated = now()
-       returning ward_id, latitude, longitude, accuracy, status, last_updated`,
-      [params.wardId, params.latitude, params.longitude, params.accuracy, status],
-    );
-    return result.rows[0];
+    const location = await this.prisma.wardCurrentLocation.upsert({
+      where: { wardId: params.wardId },
+      update: {
+        latitude: new Prisma.Decimal(params.latitude),
+        longitude: new Prisma.Decimal(params.longitude),
+        accuracy: params.accuracy ? new Prisma.Decimal(params.accuracy) : null,
+        status,
+        lastUpdated: new Date(),
+      },
+      create: {
+        wardId: params.wardId,
+        latitude: new Prisma.Decimal(params.latitude),
+        longitude: new Prisma.Decimal(params.longitude),
+        accuracy: params.accuracy ? new Prisma.Decimal(params.accuracy) : null,
+        status,
+        lastUpdated: new Date(),
+      },
+    });
+    return {
+      ward_id: location.wardId,
+      latitude: location.latitude.toString(),
+      longitude: location.longitude.toString(),
+      accuracy: location.accuracy?.toString() ?? null,
+      status: location.status,
+      last_updated: location.lastUpdated.toISOString(),
+    };
   }
 
   async getAllCurrentLocations(organizationId?: string) {
-    let query = `
-      select
-        wcl.ward_id,
-        w.user_id,
-        u.display_name as ward_name,
-        u.nickname as ward_nickname,
-        wcl.latitude,
-        wcl.longitude,
-        wcl.accuracy,
-        wcl.status,
-        wcl.last_updated,
-        w.organization_id
-      from ward_current_locations wcl
-      join wards w on wcl.ward_id = w.id
-      join users u on w.user_id = u.id
-    `;
-    const values: string[] = [];
-
+    const where: Prisma.WardCurrentLocationWhereInput = {};
     if (organizationId) {
-      query += ` where w.organization_id = $1`;
-      values.push(organizationId);
+      where.ward = { organizationId };
     }
 
-    query += ` order by wcl.last_updated desc`;
+    const locations = await this.prisma.wardCurrentLocation.findMany({
+      where,
+      include: {
+        ward: {
+          include: {
+            user: { select: { displayName: true, nickname: true } },
+          },
+        },
+      },
+      orderBy: { lastUpdated: 'desc' },
+    });
 
-    const result = await this.pool.query<{
-      ward_id: string;
-      user_id: string;
-      ward_name: string | null;
-      ward_nickname: string | null;
-      latitude: string;
-      longitude: string;
-      accuracy: string | null;
-      status: string;
-      last_updated: string;
-      organization_id: string | null;
-    }>(query, values);
-
-    return result.rows;
+    return locations.map((l) => ({
+      ward_id: l.wardId,
+      user_id: l.ward.userId,
+      ward_name: l.ward.user.displayName,
+      ward_nickname: l.ward.user.nickname,
+      latitude: l.latitude.toString(),
+      longitude: l.longitude.toString(),
+      accuracy: l.accuracy?.toString() ?? null,
+      status: l.status,
+      last_updated: l.lastUpdated.toISOString(),
+      organization_id: l.ward.organizationId,
+    }));
   }
 
-  async getHistory(params: {
-    wardId: string;
-    from?: Date;
-    to?: Date;
-    limit?: number;
-  }) {
-    const values: (string | number)[] = [params.wardId];
-    let whereClause = 'where ward_id = $1';
-    let paramIndex = 2;
+  async getHistory(params: { wardId: string; from?: Date; to?: Date; limit?: number }) {
+    const where: Prisma.WardLocationWhereInput = { wardId: params.wardId };
 
-    if (params.from) {
-      whereClause += ` and recorded_at >= $${paramIndex++}`;
-      values.push(params.from.toISOString());
+    if (params.from || params.to) {
+      where.recordedAt = {};
+      if (params.from) where.recordedAt.gte = params.from;
+      if (params.to) where.recordedAt.lte = params.to;
     }
 
-    if (params.to) {
-      whereClause += ` and recorded_at <= $${paramIndex++}`;
-      values.push(params.to.toISOString());
-    }
+    const locations = await this.prisma.wardLocation.findMany({
+      where,
+      orderBy: { recordedAt: 'desc' },
+      take: params.limit || 100,
+    });
 
-    const limit = params.limit || 100;
-    values.push(limit);
-
-    const result = await this.pool.query<{
-      id: string;
-      latitude: string;
-      longitude: string;
-      accuracy: string | null;
-      recorded_at: string;
-    }>(
-      `select id, latitude, longitude, accuracy, recorded_at
-       from ward_locations
-       ${whereClause}
-       order by recorded_at desc
-       limit $${paramIndex}`,
-      values,
-    );
-
-    return result.rows;
+    return locations.map((l) => ({
+      id: l.id,
+      latitude: l.latitude.toString(),
+      longitude: l.longitude.toString(),
+      accuracy: l.accuracy?.toString() ?? null,
+      recorded_at: l.recordedAt.toISOString(),
+    }));
   }
 
   async getCurrentLocation(wardId: string) {
-    const result = await this.pool.query<{
-      ward_id: string;
-      latitude: string;
-      longitude: string;
-      accuracy: string | null;
-      status: string;
-      last_updated: string;
-    }>(
-      `select ward_id, latitude, longitude, accuracy, status, last_updated
-       from ward_current_locations
-       where ward_id = $1`,
-      [wardId],
-    );
-    return result.rows[0];
+    const location = await this.prisma.wardCurrentLocation.findUnique({
+      where: { wardId },
+    });
+
+    if (!location) return undefined;
+
+    return {
+      ward_id: location.wardId,
+      latitude: location.latitude.toString(),
+      longitude: location.longitude.toString(),
+      accuracy: location.accuracy?.toString() ?? null,
+      status: location.status,
+      last_updated: location.lastUpdated.toISOString(),
+    };
   }
 
   async updateStatus(wardId: string, status: 'normal' | 'warning' | 'emergency'): Promise<void> {
-    await this.pool.query(
-      `update ward_current_locations set status = $2, last_updated = now() where ward_id = $1`,
-      [wardId, status],
-    );
+    await this.prisma.wardCurrentLocation.update({
+      where: { wardId },
+      data: { status, lastUpdated: new Date() },
+    });
   }
 }
