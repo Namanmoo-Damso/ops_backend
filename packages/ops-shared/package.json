@@ -1,0 +1,32 @@
+{
+  "name": "@ops/shared",
+  "version": "1.0.0",
+  "description": "OPS Backend shared types and events",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/ops-shared.git"
+  },
+  "keywords": [
+    "ops",
+    "shared",
+    "types"
+  ],
+  "author": "",
+  "license": "UNLICENSED"
+}
