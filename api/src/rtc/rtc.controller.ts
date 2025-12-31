@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { AppService } from '../app.service';
 import { AuthService } from '../auth';
-import { DbService } from '../database';
+import { RtcRepository } from './rtc.repository';
 
 @Controller()
 export class RtcController {
@@ -18,7 +18,7 @@ export class RtcController {
   constructor(
     private readonly appService: AppService,
     private readonly authService: AuthService,
-    private readonly dbService: DbService,
+    private readonly rtcRepository: RtcRepository,
   ) {}
 
   private normalizeLivekitUrl(url: string | undefined): string | undefined {
@@ -65,7 +65,7 @@ export class RtcController {
     if (bearer) {
       const kakaoPayload = this.authService.verifyAccessToken(bearer);
       if (kakaoPayload) {
-        const user = await this.dbService.findUserById(kakaoPayload.sub);
+        const user = await this.rtcRepository.findUserById(kakaoPayload.sub);
         if (user) {
           authIdentity = user.identity;
           authName = user.nickname ?? user.display_name ?? undefined;

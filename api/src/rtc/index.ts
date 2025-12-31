@@ -1,2 +1,3 @@
-export { RtcModule } from './rtc.module';
-export { RtcController } from './rtc.controller';
+export * from './rtc.module';
+export * from './rtc.controller';
+export * from './rtc.repository';
