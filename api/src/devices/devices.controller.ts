@@ -7,13 +7,45 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
+import { DevicesService } from './devices.service';
+import { RegisterDeviceDto } from './dto';
+import jwt from 'jsonwebtoken';
+
+type AuthContext = {
+  identity?: string;
+  displayName?: string;
+  userId?: string;
+  sub?: string;
+};
+
+const getConfig = () => ({
+  apiJwtSecret: process.env.API_JWT_SECRET || 'change-me',
+  authRequired: process.env.API_AUTH_REQUIRED === 'true',
+});
 
 @Controller('v1/devices')
 export class DevicesController {
   private readonly logger = new Logger(DevicesController.name);
 
-  constructor(private readonly appService: AppService) {}
+  constructor(private readonly devicesService: DevicesService) {}
+
+  private getAuthContext(authorization?: string): AuthContext | null {
+    if (!authorization) return null;
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length)
+      : '';
+    if (!token) return null;
+    try {
+      const config = getConfig();
+      const payload = jwt.verify(token, config.apiJwtSecret) as AuthContext;
+      if (!payload.userId && payload.sub) {
+        payload.userId = payload.sub;
+      }
+      return payload;
+    } catch {
+      return null;
+    }
+  }
 
   private summarizeToken(token: string | undefined): string {
     if (!token) return 'none';
@@ -25,19 +57,10 @@ export class DevicesController {
   @Post('register')
   async registerDevice(
     @Headers('authorization') authorization: string | undefined,
-    @Body()
-    body: {
-      identity?: string;
-      displayName?: string;
-      platform?: string;
-      env?: 'prod' | 'sandbox';
-      apnsToken?: string;
-      voipToken?: string;
-      supportsCallKit?: boolean;
-    },
+    @Body() body: RegisterDeviceDto,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = getConfig();
+    const auth = this.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -60,7 +83,7 @@ export class DevicesController {
       this.logger.log(
         `registerDevice identity=${identity} platform=${platform} env=${env ?? 'default'} supportsCallKit=${supportsCallKit} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
       );
-      return await this.appService.registerDevice({
+      return await this.devicesService.registerDevice({
         identity,
         displayName,
         platform,
