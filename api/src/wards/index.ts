@@ -1,3 +1,5 @@
-export { WardsModule } from './wards.module';
-export { WardsController } from './wards.controller';
-export { WardsService } from './wards.service';
+export * from './wards.module';
+export * from './wards.controller';
+export * from './wards.service';
+export * from './wards.repository';
+export * from './dto';

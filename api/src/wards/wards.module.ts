@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { WardsController } from './wards.controller';
 import { WardsService } from './wards.service';
-import { AuthService } from '../auth';
+import { WardsRepository } from './wards.repository';
+import { AuthModule } from '../auth';
 
 @Module({
+  imports: [AuthModule],
   controllers: [WardsController],
-  providers: [WardsService, AuthService],
-  exports: [WardsService],
+  providers: [WardsService, WardsRepository],
+  exports: [WardsService, WardsRepository],
 })
 export class WardsModule {}

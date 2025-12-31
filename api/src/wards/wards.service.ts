@@ -1,19 +1,24 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
-import { DbService } from '../database';
+import { WardsRepository } from './wards.repository';
+import { PrismaService } from '../prisma';
+import { toUserRow } from '../database/prisma-mappers';
 
 @Injectable()
 export class WardsService {
   private readonly logger = new Logger(WardsService.name);
 
-  constructor(private readonly dbService: DbService) {}
+  constructor(
+    private readonly wardsRepository: WardsRepository,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async verifyWardAccess(userId: string) {
-    const user = await this.dbService.findUserById(userId);
+    const user = await this.findUserById(userId);
     if (!user || user.user_type !== 'ward') {
       throw new HttpException('Ward access required', HttpStatus.FORBIDDEN);
     }
 
-    const ward = await this.dbService.findWardByUserId(user.id);
+    const ward = await this.wardsRepository.findByUserId(user.id);
     if (!ward) {
       throw new HttpException('Ward info not found', HttpStatus.NOT_FOUND);
     }
@@ -25,7 +30,7 @@ export class WardsService {
     const { user, ward } = await this.verifyWardAccess(userId);
     this.logger.log(`getSettings userId=${user.id} wardId=${ward.id}`);
 
-    const notificationSettings = await this.dbService.getNotificationSettings(user.id);
+    const notificationSettings = await this.wardsRepository.getNotificationSettings(user.id);
 
     return {
       aiPersona: ward.ai_persona,
@@ -58,7 +63,7 @@ export class WardsService {
 
     this.logger.log(`updateSettings userId=${user.id} wardId=${ward.id}`);
 
-    const updated = await this.dbService.updateWardSettings({
+    const updated = await this.wardsRepository.updateSettings({
       wardId: user.id,
       aiPersona: settings.aiPersona?.trim(),
       weeklyCallCount: settings.weeklyCallCount,
@@ -90,7 +95,7 @@ export class WardsService {
     this.logger.log(`updateLocation userId=${user.id} wardId=${ward.id} lat=${location.latitude} lng=${location.longitude}`);
 
     // 현재 위치 업데이트 (upsert)
-    await this.dbService.upsertWardCurrentLocation({
+    await this.wardsRepository.upsertCurrentLocation({
       wardId: ward.id,
       latitude: location.latitude,
       longitude: location.longitude,
@@ -98,7 +103,7 @@ export class WardsService {
     });
 
     // 위치 기록 저장
-    await this.dbService.createWardLocation({
+    await this.wardsRepository.createLocationRecord({
       wardId: ward.id,
       latitude: location.latitude,
       longitude: location.longitude,
@@ -128,7 +133,7 @@ export class WardsService {
 
     // 위치 정보가 있으면 현재 위치도 업데이트
     if (emergency.latitude !== undefined && emergency.longitude !== undefined) {
-      await this.dbService.upsertWardCurrentLocation({
+      await this.wardsRepository.upsertCurrentLocation({
         wardId: ward.id,
         latitude: emergency.latitude,
         longitude: emergency.longitude,
@@ -137,10 +142,10 @@ export class WardsService {
     }
 
     // 위치 상태를 emergency로 변경
-    await this.dbService.updateWardLocationStatus(ward.id, 'emergency');
+    await this.wardsRepository.updateLocationStatus(ward.id, 'emergency');
 
     // TODO: 연결된 보호자에게 푸시 알림 전송
-    // const guardian = await this.dbService.findGuardianByWardId(ward.id);
+    // const guardian = await this.findGuardianByWardId(ward.id);
     // if (guardian) {
     //   await this.pushService.sendEmergencyAlert(guardian.userId, ward, emergency);
     // }
@@ -150,5 +155,13 @@ export class WardsService {
       message: 'Emergency alert sent',
       type: emergency.type,
     };
+  }
+
+  // Helper method for user lookup (temporary until proper injection)
+  private async findUserById(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    return user ? toUserRow(user) : undefined;
   }
 }
