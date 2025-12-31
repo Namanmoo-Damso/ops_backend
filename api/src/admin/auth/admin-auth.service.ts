@@ -1,6 +1,6 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { AuthService } from '../../auth';
-import { DbService } from '../../database';
+import { AdminRepository } from '../../database/repositories';
 
 @Injectable()
 export class AdminAuthService {
@@ -8,7 +8,7 @@ export class AdminAuthService {
 
   constructor(
     private readonly authService: AuthService,
-    private readonly dbService: DbService,
+    private readonly adminRepository: AdminRepository,
   ) {}
 
   async verifyOAuthToken(
@@ -134,10 +134,10 @@ export class AdminAuthService {
       );
     }
 
-    let admin = await this.dbService.findAdminByProviderId(provider, oauthUser.providerId);
+    let admin = await this.adminRepository.findByProviderId(provider, oauthUser.providerId);
 
     if (!admin) {
-      admin = await this.dbService.findAdminByEmail(oauthUser.email);
+      admin = await this.adminRepository.findByEmail(oauthUser.email);
 
       if (admin) {
         throw new HttpException(
@@ -146,14 +146,14 @@ export class AdminAuthService {
         );
       }
 
-      const newAdmin = await this.dbService.createAdmin({
+      const newAdmin = await this.adminRepository.create({
         email: oauthUser.email,
         name: oauthUser.name,
         provider,
         providerId: oauthUser.providerId,
       });
 
-      admin = await this.dbService.findAdminById(newAdmin.id);
+      admin = await this.adminRepository.findById(newAdmin.id);
     }
 
     if (!admin!.is_active) {
@@ -175,9 +175,9 @@ export class AdminAuthService {
 
     const refreshTokenHash = this.authService.hashToken(jwtRefreshToken);
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    await this.dbService.createAdminRefreshToken(admin!.id, refreshTokenHash, expiresAt);
+    await this.adminRepository.createRefreshToken(admin!.id, refreshTokenHash, expiresAt);
 
-    await this.dbService.updateAdminLastLogin(admin!.id);
+    await this.adminRepository.updateLastLogin(admin!.id);
 
     this.logger.log(`OAuth login success adminId=${admin!.id} role=${admin!.role}`);
 

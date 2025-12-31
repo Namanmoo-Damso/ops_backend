@@ -14,7 +14,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { parse } from 'csv-parse/sync';
 import { AppService } from '../../app.service';
 import { AuthService } from '../../auth';
-import { DbService } from '../../database';
+import { WardRepository, AdminRepository } from '../../database/repositories';
 
 @Controller('v1/admin')
 export class WardsManagementController {
@@ -23,7 +23,8 @@ export class WardsManagementController {
   constructor(
     private readonly appService: AppService,
     private readonly authService: AuthService,
-    private readonly dbService: DbService,
+    private readonly wardRepository: WardRepository,
+    private readonly adminRepository: AdminRepository,
   ) {}
 
   private isValidEmail(email: string): boolean {
@@ -68,7 +69,7 @@ export class WardsManagementController {
       throw new HttpException('File size exceeds 5MB limit', HttpStatus.BAD_REQUEST);
     }
 
-    const organization = await this.dbService.findOrganization(organizationId);
+    const organization = await this.adminRepository.findOrganization(organizationId);
     if (!organization) {
       throw new HttpException('Organization not found', HttpStatus.NOT_FOUND);
     }
@@ -113,13 +114,13 @@ export class WardsManagementController {
             throw new Error('이름 필수');
           }
 
-          const existing = await this.dbService.findOrganizationWard(organizationId, email);
+          const existing = await this.wardRepository.findOrganizationWard(organizationId, email);
           if (existing) {
             results.skipped++;
             continue;
           }
 
-          await this.dbService.createOrganizationWard({
+          await this.wardRepository.createOrganizationWard({
             organizationId,
             email,
             phoneNumber: record.phone_number.trim(),
@@ -167,8 +168,8 @@ export class WardsManagementController {
     const adminId = tokenPayload.sub;
 
     const [wards, stats] = await Promise.all([
-      this.dbService.getMyManagedWards(adminId),
-      this.dbService.getMyManagedWardsStats(adminId),
+      this.wardRepository.getMyManagedWards(adminId),
+      this.wardRepository.getMyManagedWardsStats(adminId),
     ]);
 
     return {

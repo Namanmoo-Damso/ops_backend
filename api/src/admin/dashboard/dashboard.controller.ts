@@ -5,13 +5,13 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { DbService } from '../../database';
+import { DashboardRepository } from '../../database/repositories';
 
 @Controller('v1/admin/dashboard')
 export class DashboardController {
   private readonly logger = new Logger(DashboardController.name);
 
-  constructor(private readonly dbService: DbService) {}
+  constructor(private readonly dashboardRepository: DashboardRepository) {}
 
   @Get('stats')
   async getStats() {
@@ -28,14 +28,14 @@ export class DashboardController {
         organizationStats,
         recentActivity,
       ] = await Promise.all([
-        this.dbService.getDashboardOverview(),
-        this.dbService.getTodayStats(),
-        this.dbService.getWeeklyTrend(),
-        this.dbService.getMoodDistribution(),
-        this.dbService.getHealthAlertsSummary(),
-        this.dbService.getTopHealthKeywords(10),
-        this.dbService.getOrganizationStats(),
-        this.dbService.getRecentActivity(20),
+        this.dashboardRepository.getOverview(),
+        this.dashboardRepository.getTodayStats(),
+        this.dashboardRepository.getWeeklyTrend(),
+        this.dashboardRepository.getMoodDistribution(),
+        this.dashboardRepository.getHealthAlertsSummary(),
+        this.dashboardRepository.getTopHealthKeywords(10),
+        this.dashboardRepository.getOrganizationStats(),
+        this.dashboardRepository.getRecentActivity(20),
       ]);
 
       return {
@@ -61,8 +61,8 @@ export class DashboardController {
 
     try {
       const [realtime, recentActivity] = await Promise.all([
-        this.dbService.getRealtimeStats(),
-        this.dbService.getRecentActivity(10),
+        this.dashboardRepository.getRealtimeStats(),
+        this.dashboardRepository.getRecentActivity(10),
       ]);
 
       return {

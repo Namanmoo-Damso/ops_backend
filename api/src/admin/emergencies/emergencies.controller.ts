@@ -12,7 +12,12 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AppService } from '../../app.service';
-import { DbService } from '../../database';
+import {
+  EmergencyRepository,
+  LocationRepository,
+  WardRepository,
+  UserRepository,
+} from '../../database/repositories';
 
 @Controller('v1/admin')
 export class EmergenciesController {
@@ -20,7 +25,10 @@ export class EmergenciesController {
 
   constructor(
     private readonly appService: AppService,
-    private readonly dbService: DbService,
+    private readonly emergencyRepository: EmergencyRepository,
+    private readonly locationRepository: LocationRepository,
+    private readonly wardRepository: WardRepository,
+    private readonly userRepository: UserRepository,
   ) {}
 
   @Post('emergency')
@@ -44,18 +52,18 @@ export class EmergenciesController {
     }
 
     try {
-      const ward = await this.dbService.findWardById(wardId);
+      const ward = await this.wardRepository.findById(wardId);
       if (!ward) {
         throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
       }
 
-      const currentLocation = await this.dbService.getWardCurrentLocation(wardId);
+      const currentLocation = await this.locationRepository.getCurrentLocation(wardId);
       const latitude = currentLocation ? parseFloat(currentLocation.latitude) : undefined;
       const longitude = currentLocation ? parseFloat(currentLocation.longitude) : undefined;
 
       this.logger.log(`triggerEmergency wardId=${wardId}`);
 
-      const emergency = await this.dbService.createEmergency({
+      const emergency = await this.emergencyRepository.create({
         wardId,
         type: 'admin',
         latitude,
@@ -63,7 +71,7 @@ export class EmergenciesController {
         message: body.message?.trim(),
       });
 
-      await this.dbService.updateWardLocationStatus(wardId, 'emergency');
+      await this.locationRepository.updateStatus(wardId, 'emergency');
 
       const nearbyAgencies: Array<{
         id: string;
@@ -74,10 +82,10 @@ export class EmergenciesController {
       }> = [];
 
       if (latitude !== undefined && longitude !== undefined) {
-        const agencies = await this.dbService.findNearbyAgencies(latitude, longitude, 10, 5);
+        const agencies = await this.emergencyRepository.findNearbyAgencies(latitude, longitude, 10, 5);
         for (const agency of agencies) {
           const distanceKm = parseFloat(agency.distance_km);
-          await this.dbService.createEmergencyContact({
+          await this.emergencyRepository.createContact({
             emergencyId: emergency.id,
             agencyId: agency.id,
             distanceKm,
@@ -94,7 +102,7 @@ export class EmergenciesController {
       }
 
       let guardianNotified = false;
-      const wardInfo = await this.dbService.getWardWithGuardianInfo(wardId);
+      const wardInfo = await this.wardRepository.getWithGuardianInfo(wardId);
       if (wardInfo?.guardian_identity) {
         try {
           await this.appService.sendUserPush({
@@ -108,7 +116,7 @@ export class EmergenciesController {
               wardId,
             },
           });
-          await this.dbService.updateEmergencyGuardianNotified(emergency.id);
+          await this.emergencyRepository.updateGuardianNotified(emergency.id);
           guardianNotified = true;
         } catch (pushError) {
           this.logger.warn(`Emergency guardian push failed: ${(pushError as Error).message}`);
@@ -154,7 +162,7 @@ export class EmergenciesController {
     this.logger.log(`getEmergencies status=${status ?? 'all'} wardId=${wardId ?? 'all'}`);
 
     try {
-      const emergencies = await this.dbService.getEmergencies({
+      const emergencies = await this.emergencyRepository.getList({
         status: status as 'active' | 'resolved' | 'false_alarm' | undefined,
         wardId: wardId?.trim(),
         limit: limit ? parseInt(limit, 10) : 50,
@@ -162,7 +170,7 @@ export class EmergenciesController {
 
       const emergenciesWithContacts = await Promise.all(
         emergencies.map(async (e) => {
-          const contacts = await this.dbService.getEmergencyContacts(e.id);
+          const contacts = await this.emergencyRepository.getContacts(e.id);
           return {
             id: e.id,
             wardId: e.ward_id,
@@ -207,12 +215,12 @@ export class EmergenciesController {
     this.logger.log(`getEmergencyDetail emergencyId=${emergencyId}`);
 
     try {
-      const emergency = await this.dbService.getEmergencyById(emergencyId);
+      const emergency = await this.emergencyRepository.getById(emergencyId);
       if (!emergency) {
         throw new HttpException('Emergency not found', HttpStatus.NOT_FOUND);
       }
 
-      const contacts = await this.dbService.getEmergencyContacts(emergencyId);
+      const contacts = await this.emergencyRepository.getContacts(emergencyId);
 
       return {
         id: emergency.id,
@@ -278,7 +286,7 @@ export class EmergenciesController {
     this.logger.log(`resolveEmergency emergencyId=${emergencyId} status=${resolveStatus}`);
 
     try {
-      const emergency = await this.dbService.getEmergencyById(emergencyId);
+      const emergency = await this.emergencyRepository.getById(emergencyId);
       if (!emergency) {
         throw new HttpException('Emergency not found', HttpStatus.NOT_FOUND);
       }
@@ -290,13 +298,13 @@ export class EmergenciesController {
       const resolvedBy = auth?.identity || 'admin';
       let resolvedByUserId: string | null = null;
       try {
-        const user = await this.dbService.upsertUser(resolvedBy);
+        const user = await this.userRepository.upsert(resolvedBy);
         resolvedByUserId = user.id;
       } catch {
         // ignore
       }
 
-      const resolved = await this.dbService.resolveEmergency({
+      const resolved = await this.emergencyRepository.resolve({
         emergencyId,
         resolvedBy: resolvedByUserId || resolvedBy,
         status: resolveStatus,
@@ -304,7 +312,7 @@ export class EmergenciesController {
       });
 
       if (emergency.ward_id) {
-        await this.dbService.updateWardLocationStatus(emergency.ward_id, 'normal');
+        await this.locationRepository.updateStatus(emergency.ward_id, 'normal');
       }
 
       return {

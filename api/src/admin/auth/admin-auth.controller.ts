@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { AdminAuthService } from './admin-auth.service';
 import { AuthService } from '../../auth';
-import { DbService } from '../../database';
+import { AdminRepository } from '../../database/repositories';
 
 @Controller('admin')
 export class AdminAuthController {
@@ -20,7 +20,7 @@ export class AdminAuthController {
   constructor(
     private readonly adminAuthService: AdminAuthService,
     private readonly authService: AuthService,
-    private readonly dbService: DbService,
+    private readonly adminRepository: AdminRepository,
   ) {}
 
   @Post('auth/oauth/code')
@@ -116,7 +116,7 @@ export class AdminAuthController {
 
     try {
       const tokenHash = this.authService.hashToken(refreshToken);
-      const storedToken = await this.dbService.findAdminRefreshToken(tokenHash);
+      const storedToken = await this.adminRepository.findRefreshToken(tokenHash);
 
       if (!storedToken) {
         throw new HttpException(
@@ -125,16 +125,16 @@ export class AdminAuthController {
         );
       }
 
-      const admin = await this.dbService.findAdminById(storedToken.admin_id);
+      const admin = await this.adminRepository.findById(storedToken.admin_id);
       if (!admin || !admin.is_active) {
-        await this.dbService.deleteAdminRefreshToken(tokenHash);
+        await this.adminRepository.deleteRefreshToken(tokenHash);
         throw new HttpException(
           '계정이 비활성화되었습니다.',
           HttpStatus.FORBIDDEN,
         );
       }
 
-      await this.dbService.deleteAdminRefreshToken(tokenHash);
+      await this.adminRepository.deleteRefreshToken(tokenHash);
 
       const jwtPayload = {
         sub: admin.id,
@@ -148,7 +148,7 @@ export class AdminAuthController {
 
       const newTokenHash = this.authService.hashToken(newRefreshToken);
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      await this.dbService.createAdminRefreshToken(admin.id, newTokenHash, expiresAt);
+      await this.adminRepository.createRefreshToken(admin.id, newTokenHash, expiresAt);
 
       this.logger.log(`refreshToken success adminId=${admin.id}`);
 
@@ -176,7 +176,7 @@ export class AdminAuthController {
 
     if (refreshToken) {
       const tokenHash = this.authService.hashToken(refreshToken);
-      await this.dbService.deleteAdminRefreshToken(tokenHash);
+      await this.adminRepository.deleteRefreshToken(tokenHash);
     }
 
     return { success: true };
@@ -184,7 +184,7 @@ export class AdminAuthController {
 
   @Get('organizations')
   async listOrganizations() {
-    const organizations = await this.dbService.listAllOrganizations();
+    const organizations = await this.adminRepository.listAllOrganizations();
     return {
       organizations: organizations.map((org) => ({
         id: org.id,
@@ -221,7 +221,7 @@ export class AdminAuthController {
       throw new HttpException('Invalid token', HttpStatus.UNAUTHORIZED);
     }
 
-    const result = await this.dbService.findOrCreateOrganization(name);
+    const result = await this.adminRepository.findOrCreateOrganization(name);
     this.logger.log(`findOrCreateOrganization name=${name} created=${result.created}`);
 
     return {
@@ -257,7 +257,7 @@ export class AdminAuthController {
 
     try {
       const payload = this.authService.verifyAdminAccessToken(accessToken);
-      const admin = await this.dbService.findAdminById(payload.sub);
+      const admin = await this.adminRepository.findById(payload.sub);
 
       if (!admin || !admin.is_active) {
         throw new HttpException(
@@ -266,7 +266,7 @@ export class AdminAuthController {
         );
       }
 
-      const organization = await this.dbService.findOrganization(organizationId);
+      const organization = await this.adminRepository.findOrganization(organizationId);
       if (!organization) {
         throw new HttpException(
           '조직을 찾을 수 없습니다.',
@@ -274,7 +274,7 @@ export class AdminAuthController {
         );
       }
 
-      await this.dbService.updateAdminOrganization(admin.id, organizationId);
+      await this.adminRepository.updateOrganization(admin.id, organizationId);
       this.logger.log(`updateOrganization adminId=${admin.id} organizationId=${organizationId}`);
 
       return {
@@ -310,7 +310,7 @@ export class AdminAuthController {
 
     try {
       const payload = this.authService.verifyAdminAccessToken(accessToken);
-      const admin = await this.dbService.findAdminById(payload.sub);
+      const admin = await this.adminRepository.findById(payload.sub);
 
       if (!admin || !admin.is_active) {
         throw new HttpException(
@@ -319,7 +319,7 @@ export class AdminAuthController {
         );
       }
 
-      const permissions = await this.dbService.getAdminPermissions(admin.id);
+      const permissions = await this.adminRepository.getPermissions(admin.id);
 
       return {
         admin: {

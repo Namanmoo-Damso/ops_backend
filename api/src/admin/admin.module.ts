@@ -9,6 +9,14 @@ import { LocationsController } from './locations/locations.controller';
 import { EmergenciesController } from './emergencies/emergencies.controller';
 import { AppService } from '../app.service';
 import { AuthService } from '../auth';
+import {
+  DashboardRepository,
+  LocationRepository,
+  WardRepository,
+  EmergencyRepository,
+  AdminRepository,
+  UserRepository,
+} from '../database/repositories';
 
 @Module({
   imports: [
@@ -27,6 +35,12 @@ import { AuthService } from '../auth';
     AdminAuthService,
     AppService,
     AuthService,
+    DashboardRepository,
+    LocationRepository,
+    WardRepository,
+    EmergencyRepository,
+    AdminRepository,
+    UserRepository,
   ],
   exports: [AdminAuthService],
 })

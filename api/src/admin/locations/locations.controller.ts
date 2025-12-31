@@ -11,7 +11,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AppService } from '../../app.service';
-import { DbService } from '../../database';
+import { LocationRepository, WardRepository } from '../../database/repositories';
 
 @Controller('v1/admin/locations')
 export class LocationsController {
@@ -19,7 +19,8 @@ export class LocationsController {
 
   constructor(
     private readonly appService: AppService,
-    private readonly dbService: DbService,
+    private readonly locationRepository: LocationRepository,
+    private readonly wardRepository: WardRepository,
   ) {}
 
   @Get()
@@ -36,7 +37,7 @@ export class LocationsController {
     this.logger.log(`getLocations organizationId=${organizationId ?? 'all'}`);
 
     try {
-      const locations = await this.dbService.getAllWardCurrentLocations(organizationId);
+      const locations = await this.locationRepository.getAllCurrentLocations(organizationId);
 
       return {
         locations: locations.map((loc) => ({
@@ -77,12 +78,12 @@ export class LocationsController {
     this.logger.log(`getLocationHistory wardId=${wardId} from=${from ?? 'none'} to=${to ?? 'none'}`);
 
     try {
-      const ward = await this.dbService.findWardById(wardId);
+      const ward = await this.wardRepository.findById(wardId);
       if (!ward) {
         throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
       }
 
-      const history = await this.dbService.getWardLocationHistory({
+      const history = await this.locationRepository.getHistory({
         wardId,
         from: from ? new Date(from) : undefined,
         to: to ? new Date(to) : undefined,
@@ -134,12 +135,12 @@ export class LocationsController {
     this.logger.log(`updateLocationStatus wardId=${wardId} status=${status}`);
 
     try {
-      const ward = await this.dbService.findWardById(wardId);
+      const ward = await this.wardRepository.findById(wardId);
       if (!ward) {
         throw new HttpException('Ward not found', HttpStatus.NOT_FOUND);
       }
 
-      await this.dbService.updateWardLocationStatus(
+      await this.locationRepository.updateStatus(
         wardId,
         status as 'normal' | 'warning' | 'emergency',
       );
