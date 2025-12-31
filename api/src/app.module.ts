@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { CommonModule } from './common';
 import { DatabaseModule } from './database';
 import { AuthModule } from './auth';
@@ -42,6 +41,5 @@ import { EventsModule } from './events';
     SchedulerModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

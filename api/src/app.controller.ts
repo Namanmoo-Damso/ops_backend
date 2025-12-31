@@ -6,13 +6,13 @@ import {
   Post,
   Logger,
 } from '@nestjs/common';
-import { DbService } from './database';
+import { UsersService } from './users';
 
 @Controller()
 export class AppController {
   private readonly logger = new Logger(AppController.name);
 
-  constructor(private readonly dbService: DbService) {}
+  constructor(private readonly usersService: UsersService) {}
 
   @Get('/healthz')
   getHealth() {
@@ -48,13 +48,13 @@ export class AppController {
     // 비동기로 처리하되 3초 이내 응답 보장
     setImmediate(async () => {
       try {
-        const user = await this.dbService.findUserByKakaoId(kakaoId);
+        const user = await this.usersService.findByKakaoId(kakaoId);
         if (!user) {
           this.logger.log(`kakaoUnlink user not found kakaoId=${kakaoId}`);
           return;
         }
 
-        await this.dbService.deleteUser(user.id);
+        await this.usersService.deleteUser(user.id);
         this.logger.log(`kakaoUnlink deleted userId=${user.id} kakaoId=${kakaoId}`);
       } catch (error) {
         this.logger.error(`kakaoUnlink failed kakaoId=${kakaoId} error=${(error as Error).message}`);
