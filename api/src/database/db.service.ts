@@ -266,6 +266,15 @@ export class DbService implements OnModuleDestroy {
     return this.guardians.getGuardianNotificationSettings(guardianUserId);
   }
 
+  async upsertNotificationSettings(params: {
+    userId: string;
+    callReminder?: boolean;
+    callComplete?: boolean;
+    healthAlert?: boolean;
+  }) {
+    return this.guardians.upsertNotificationSettings(params);
+  }
+
   // ============================================================
   // Ward methods
   // ============================================================

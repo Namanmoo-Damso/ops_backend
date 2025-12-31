@@ -178,4 +178,45 @@ export class GuardiansController {
       throw new HttpException('Failed to delete ward', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+  @Get('notification-settings')
+  async getNotificationSettings(@Headers('authorization') authorization: string | undefined) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      return await this.guardiansService.getNotificationSettings(payload.sub);
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn('getNotificationSettings failed error=' + (error as Error).message);
+      throw new HttpException('Failed to get notification settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put('notification-settings')
+  async updateNotificationSettings(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: {
+      callReminder?: boolean;
+      callComplete?: boolean;
+      healthAlert?: boolean;
+    },
+  ) {
+    const payload = this.verifyAuthHeader(authorization);
+
+    try {
+      return await this.guardiansService.updateNotificationSettings(payload.sub, {
+        callReminder: body.callReminder,
+        callComplete: body.callComplete,
+        healthAlert: body.healthAlert,
+      });
+    } catch (error) {
+      if ((error as HttpException).getStatus?.()) {
+        throw error;
+      }
+      this.logger.warn('updateNotificationSettings failed error=' + (error as Error).message);
+      throw new HttpException('Failed to update notification settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
 }

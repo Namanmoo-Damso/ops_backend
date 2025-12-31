@@ -203,4 +203,42 @@ export class GuardiansService {
       throw new HttpException('Ward registration not found', HttpStatus.NOT_FOUND);
     }
   }
+
+  async getNotificationSettings(userId: string) {
+    const { guardian } = await this.verifyGuardianAccess(userId);
+    this.logger.log('getNotificationSettings guardianId=' + guardian.id);
+
+    const settings = await this.dbService.getNotificationSettings(userId);
+
+    return {
+      callReminder: settings?.call_reminder ?? true,
+      callComplete: settings?.call_complete ?? true,
+      healthAlert: settings?.health_alert ?? true,
+    };
+  }
+
+  async updateNotificationSettings(
+    userId: string,
+    settings: {
+      callReminder?: boolean;
+      callComplete?: boolean;
+      healthAlert?: boolean;
+    },
+  ) {
+    const { guardian } = await this.verifyGuardianAccess(userId);
+    this.logger.log('updateNotificationSettings guardianId=' + guardian.id);
+
+    const updated = await this.dbService.upsertNotificationSettings({
+      userId,
+      callReminder: settings.callReminder,
+      callComplete: settings.callComplete,
+      healthAlert: settings.healthAlert,
+    });
+
+    return {
+      callReminder: updated.call_reminder,
+      callComplete: updated.call_complete,
+      healthAlert: updated.health_alert,
+    };
+  }
 }

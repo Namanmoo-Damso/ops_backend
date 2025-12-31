@@ -273,4 +273,28 @@ export class GuardianRepository {
     }
     return { call_complete: true, health_alert: true };
   }
+
+  async upsertNotificationSettings(params: {
+    userId: string;
+    callReminder?: boolean;
+    callComplete?: boolean;
+    healthAlert?: boolean;
+  }) {
+    const result = await this.pool.query<{
+      call_reminder: boolean;
+      call_complete: boolean;
+      health_alert: boolean;
+    }>(
+      `insert into notification_settings (user_id, call_reminder, call_complete, health_alert)
+       values ($1, coalesce($2, true), coalesce($3, true), coalesce($4, true))
+       on conflict (user_id) do update set
+         call_reminder = coalesce($2, notification_settings.call_reminder),
+         call_complete = coalesce($3, notification_settings.call_complete),
+         health_alert = coalesce($4, notification_settings.health_alert),
+         updated_at = now()
+       returning call_reminder, call_complete, health_alert`,
+      [params.userId, params.callReminder, params.callComplete, params.healthAlert],
+    );
+    return result.rows[0];
+  }
 }

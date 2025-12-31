@@ -75,4 +75,80 @@ export class WardsService {
       callDurationMinutes: updated.call_duration_minutes,
     };
   }
+
+  async updateLocation(
+    userId: string,
+    location: {
+      latitude: number;
+      longitude: number;
+      accuracy?: number;
+      timestamp?: string;
+    },
+  ) {
+    const { user, ward } = await this.verifyWardAccess(userId);
+
+    this.logger.log(`updateLocation userId=${user.id} wardId=${ward.id} lat=${location.latitude} lng=${location.longitude}`);
+
+    // 현재 위치 업데이트 (upsert)
+    await this.dbService.upsertWardCurrentLocation({
+      wardId: ward.id,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy,
+    });
+
+    // 위치 기록 저장
+    await this.dbService.createWardLocation({
+      wardId: ward.id,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy ?? null,
+      recordedAt: location.timestamp ? new Date(location.timestamp) : new Date(),
+    });
+
+    return {
+      success: true,
+      message: 'Location updated successfully',
+    };
+  }
+
+  async triggerEmergency(
+    userId: string,
+    emergency: {
+      type: string;
+      message?: string;
+      latitude?: number;
+      longitude?: number;
+      accuracy?: number;
+    },
+  ) {
+    const { user, ward } = await this.verifyWardAccess(userId);
+
+    this.logger.log(`triggerEmergency userId=${user.id} wardId=${ward.id} type=${emergency.type}`);
+
+    // 위치 정보가 있으면 현재 위치도 업데이트
+    if (emergency.latitude !== undefined && emergency.longitude !== undefined) {
+      await this.dbService.upsertWardCurrentLocation({
+        wardId: ward.id,
+        latitude: emergency.latitude,
+        longitude: emergency.longitude,
+        accuracy: emergency.accuracy,
+      });
+    }
+
+    // 위치 상태를 emergency로 변경
+    await this.dbService.updateWardLocationStatus(ward.id, 'emergency');
+
+    // TODO: 연결된 보호자에게 푸시 알림 전송
+    // const guardian = await this.dbService.findGuardianByWardId(ward.id);
+    // if (guardian) {
+    //   await this.pushService.sendEmergencyAlert(guardian.userId, ward, emergency);
+    // }
+
+    return {
+      success: true,
+      message: 'Emergency alert sent',
+      type: emergency.type,
+    };
+  }
 }
