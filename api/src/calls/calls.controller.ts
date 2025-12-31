@@ -8,32 +8,59 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
+import { CallsService } from './calls.service';
 import { AiService } from '../ai';
 import { NotificationScheduler } from '../scheduler';
+import { InviteCallDto, AnswerCallDto, EndCallDto } from './dto';
+import jwt from 'jsonwebtoken';
+
+type AuthContext = {
+  identity?: string;
+  displayName?: string;
+  userId?: string;
+  sub?: string;
+};
+
+const getConfig = () => ({
+  apiJwtSecret: process.env.API_JWT_SECRET || 'change-me',
+  authRequired: process.env.API_AUTH_REQUIRED === 'true',
+});
 
 @Controller('v1/calls')
 export class CallsController {
   private readonly logger = new Logger(CallsController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly callsService: CallsService,
     private readonly aiService: AiService,
     private readonly notificationScheduler: NotificationScheduler,
   ) {}
 
+  private getAuthContext(authorization?: string): AuthContext | null {
+    if (!authorization) return null;
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length)
+      : '';
+    if (!token) return null;
+    try {
+      const config = getConfig();
+      const payload = jwt.verify(token, config.apiJwtSecret) as AuthContext;
+      if (!payload.userId && payload.sub) {
+        payload.userId = payload.sub;
+      }
+      return payload;
+    } catch {
+      return null;
+    }
+  }
+
   @Post('invite')
   async invite(
     @Headers('authorization') authorization: string | undefined,
-    @Body() body: {
-      callerIdentity?: string;
-      callerName?: string;
-      calleeIdentity?: string;
-      roomName?: string;
-    },
+    @Body() body: InviteCallDto,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = getConfig();
+    const auth = this.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -50,7 +77,7 @@ export class CallsController {
     this.logger.log(
       `invite caller=${callerIdentity} callee=${calleeIdentity} room=${body.roomName ?? 'auto'}`,
     );
-    return await this.appService.inviteCall({
+    return await this.callsService.invite({
       callerIdentity,
       callerName: body.callerName?.trim(),
       calleeIdentity,
@@ -61,10 +88,10 @@ export class CallsController {
   @Post('answer')
   async answer(
     @Headers('authorization') authorization: string | undefined,
-    @Body() body: { callId?: string },
+    @Body() body: AnswerCallDto,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = getConfig();
+    const auth = this.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -75,16 +102,16 @@ export class CallsController {
     }
 
     this.logger.log(`answer callId=${callId}`);
-    return await this.appService.answerCall(callId);
+    return await this.callsService.answer(callId);
   }
 
   @Post('end')
   async end(
     @Headers('authorization') authorization: string | undefined,
-    @Body() body: { callId?: string },
+    @Body() body: EndCallDto,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = getConfig();
+    const auth = this.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -95,7 +122,7 @@ export class CallsController {
     }
 
     this.logger.log(`end callId=${callId}`);
-    const result = await this.appService.endCall(callId);
+    const result = await this.callsService.end(callId);
 
     // 비동기로 보호자에게 통화 완료 알림 전송
     this.notificationScheduler.notifyCallComplete(callId).catch((error) => {
@@ -110,8 +137,8 @@ export class CallsController {
     @Headers('authorization') authorization: string | undefined,
     @Param('callId') callId: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = getConfig();
+    const auth = this.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
