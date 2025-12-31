@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DbService } from '../database';
-import { AppService } from '../app.service';
+import { PushService } from '../push';
 
 @Injectable()
 export class NotificationScheduler {
@@ -9,7 +9,7 @@ export class NotificationScheduler {
 
   constructor(
     private readonly dbService: DbService,
-    private readonly appService: AppService,
+    private readonly pushService: PushService,
   ) {}
 
   // 매 30분마다 리마인더 체크 (예: 09:00, 09:30, 10:00, ...)
@@ -32,7 +32,7 @@ export class NotificationScheduler {
 
       for (const schedule of schedules) {
         // 어르신에게 리마인더 푸시
-        await this.appService.sendUserPush({
+        await this.pushService.sendUserPush({
           identity: schedule.ward_identity,
           type: 'alert',
           title: '담소',
@@ -60,7 +60,7 @@ export class NotificationScheduler {
 
       for (const missed of missedCalls) {
         // 보호자에게 미진행 알림
-        await this.appService.sendUserPush({
+        await this.pushService.sendUserPush({
           identity: missed.guardian_identity,
           type: 'alert',
           title: '담소',
@@ -92,7 +92,7 @@ export class NotificationScheduler {
       }
 
       const aiPersona = callInfo.ward_ai_persona || '다미';
-      await this.appService.sendUserPush({
+      await this.pushService.sendUserPush({
         identity: callInfo.guardian_identity,
         type: 'alert',
         title: '담소',
