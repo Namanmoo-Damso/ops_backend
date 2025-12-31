@@ -1,9 +1,7 @@
 import {
   Controller,
-  Get,
   Post,
   Body,
-  Param,
   Headers,
   HttpException,
   HttpStatus,
@@ -37,27 +35,6 @@ export class RtcController {
     const len = token.length;
     if (len <= 8) return `${len}c`;
     return `${token.slice(0, 4)}..${token.slice(-4)}`;
-  }
-
-  @Get('v1/rooms/:roomName/members')
-  async listMembers(
-    @Headers('authorization') authorization: string | undefined,
-    @Param('roomName') roomNameParam: string,
-  ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
-    if (config.authRequired && !auth) {
-      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
-    }
-
-    const roomName = roomNameParam?.trim();
-    if (!roomName) {
-      throw new HttpException('roomName is required', HttpStatus.BAD_REQUEST);
-    }
-
-    const members = await this.appService.listRoomMembers(roomName);
-    this.logger.log(`listMembers room=${roomName} count=${members.length}`);
-    return { roomName, members };
   }
 
   @Post('v1/rtc/token')

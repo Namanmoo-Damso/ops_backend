@@ -9,6 +9,7 @@ import { UsersModule } from './users';
 import { GuardiansModule } from './guardians';
 import { WardsModule } from './wards';
 import { CallsModule } from './calls';
+import { RoomsModule } from './rooms';
 import { RtcModule } from './rtc';
 import { DevicesModule } from './devices';
 import { PushModule, PushController } from './push';
@@ -34,6 +35,7 @@ import { EventsModule } from './events';
     GuardiansModule,
     WardsModule,
     CallsModule,
+    RoomsModule,
     RtcModule,
     DevicesModule,
     AdminModule,
