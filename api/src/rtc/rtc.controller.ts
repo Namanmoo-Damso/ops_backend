@@ -7,18 +7,20 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
-import { AuthService } from '../auth';
+import { RtcService } from './rtc.service';
 import { RtcRepository } from './rtc.repository';
+import { AuthService } from '../auth';
+
+const isAuthRequired = (): boolean => process.env.API_AUTH_REQUIRED === 'true';
 
 @Controller()
 export class RtcController {
   private readonly logger = new Logger(RtcController.name);
 
   constructor(
-    private readonly appService: AppService,
-    private readonly authService: AuthService,
+    private readonly rtcService: RtcService,
     private readonly rtcRepository: RtcRepository,
+    private readonly authService: AuthService,
   ) {}
 
   private normalizeLivekitUrl(url: string | undefined): string | undefined {
@@ -53,7 +55,7 @@ export class RtcController {
       supportsCallKit?: boolean;
     },
   ) {
-    const config = this.appService.getConfig();
+    const authRequired = isAuthRequired();
     const authHeader = authorization ?? '';
     const bearer = authHeader.startsWith('Bearer ')
       ? authHeader.slice('Bearer '.length)
@@ -63,6 +65,7 @@ export class RtcController {
     let authName: string | undefined;
 
     if (bearer) {
+      // 카카오 토큰 확인
       const kakaoPayload = this.authService.verifyAccessToken(bearer);
       if (kakaoPayload) {
         const user = await this.rtcRepository.findUserById(kakaoPayload.sub);
@@ -71,17 +74,16 @@ export class RtcController {
           authName = user.nickname ?? user.display_name ?? undefined;
         }
       } else {
-        try {
-          const payload = this.appService.verifyApiToken(bearer);
-          authIdentity = payload.identity;
-          authName = payload.displayName;
-        } catch {
-          if (config.authRequired) {
-            throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
-          }
+        // 익명 API 토큰 확인
+        const apiPayload = this.authService.verifyApiToken(bearer);
+        if (apiPayload) {
+          authIdentity = apiPayload.identity;
+          authName = apiPayload.displayName;
+        } else if (authRequired) {
+          throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
         }
       }
-    } else if (config.authRequired) {
+    } else if (authRequired) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -112,7 +114,7 @@ export class RtcController {
       `issueToken room=${roomName} identity=${identity} role=${role} env=${body.env ?? 'default'} livekit=${livekitUrlOverride ?? 'default'} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
     );
 
-    const rtcData = await this.appService.issueRtcToken({
+    const rtcData = await this.rtcService.issueToken({
       roomName,
       identity,
       name,

@@ -383,6 +383,52 @@ export class AuthService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // [익명 API 토큰] - 기존 호환성 유지
+  // ─────────────────────────────────────────────────────────────────────────
+
+  issueApiToken(identity: string, displayName: string): {
+    accessToken: string;
+    expiresAt: string;
+    user: { id: string; identity: string; displayName: string };
+  } {
+    const ttlSeconds = parseInt(process.env.API_JWT_TTL ?? '86400', 10);
+    const userId = crypto.randomUUID();
+    const token = jwt.sign(
+      { sub: userId, identity, displayName, tokenType: 'api' },
+      this.jwtSecret,
+      { expiresIn: ttlSeconds },
+    );
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+
+    return {
+      accessToken: token,
+      expiresAt,
+      user: { id: userId, identity, displayName },
+    };
+  }
+
+  verifyApiToken(token: string): { identity?: string; displayName?: string; userId?: string; sub?: string } | null {
+    try {
+      const payload = jwt.verify(token, this.jwtSecret) as {
+        sub?: string;
+        identity?: string;
+        displayName?: string;
+        tokenType?: string;
+      };
+      // api 토큰 또는 레거시 토큰 (tokenType 없는 경우) 둘 다 허용
+      if (payload.tokenType && payload.tokenType !== 'api') return null;
+      return {
+        identity: payload.identity,
+        displayName: payload.displayName,
+        userId: payload.sub,
+        sub: payload.sub,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // [관리자 JWT] - Issue #18
   // ─────────────────────────────────────────────────────────────────────────
 

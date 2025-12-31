@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { RtcController } from './rtc.controller';
+import { RtcService } from './rtc.service';
 import { RtcRepository } from './rtc.repository';
-import { AppService } from '../app.service';
 import { AuthModule } from '../auth';
+import { DevicesModule } from '../devices';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, DevicesModule],
   controllers: [RtcController],
-  providers: [RtcRepository, AppService],
-  exports: [RtcRepository],
+  providers: [RtcService, RtcRepository],
+  exports: [RtcService, RtcRepository],
 })
 export class RtcModule {}
