@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { CommonModule } from './common';
 import { DatabaseModule } from './database';
 import { AuthModule } from './auth';
@@ -17,17 +16,21 @@ import { AiModule } from './ai';
 import { SchedulerModule } from './scheduler';
 import { PrismaModule } from './prisma';
 import { EventsModule } from './events';
+import { ConfigModule } from './core/config';
+import { LiveKitModule } from './integration/livekit';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     // 전역 모듈 (순서 중요)
+    ConfigModule,
     CommonModule,
     DatabaseModule,
     PrismaModule,
     PushModule,
     AiModule,
     EventsModule,
+    LiveKitModule,
     // 기능 모듈
     AuthModule,
     UsersModule,
@@ -40,6 +43,6 @@ import { EventsModule } from './events';
     SchedulerModule,
   ],
   controllers: [AppController, PushController],
-  providers: [AppService],
+  providers: [],
 })
 export class AppModule {}

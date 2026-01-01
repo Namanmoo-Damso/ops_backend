@@ -8,16 +8,20 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
+import { CallsService } from './calls.service';
+import { AuthService } from '../auth';
 import { AiService } from '../ai';
 import { NotificationScheduler } from '../scheduler';
+import { ConfigService } from '../core/config';
 
 @Controller('v1/calls')
 export class CallsController {
   private readonly logger = new Logger(CallsController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly callsService: CallsService,
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
     private readonly aiService: AiService,
     private readonly notificationScheduler: NotificationScheduler,
   ) {}
@@ -32,8 +36,8 @@ export class CallsController {
       roomName?: string;
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -50,7 +54,7 @@ export class CallsController {
     this.logger.log(
       `invite caller=${callerIdentity} callee=${calleeIdentity} room=${body.roomName ?? 'auto'}`,
     );
-    return await this.appService.inviteCall({
+    return await this.callsService.inviteCall({
       callerIdentity,
       callerName: body.callerName?.trim(),
       calleeIdentity,
@@ -63,8 +67,8 @@ export class CallsController {
     @Headers('authorization') authorization: string | undefined,
     @Body() body: { callId?: string },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -75,7 +79,7 @@ export class CallsController {
     }
 
     this.logger.log(`answer callId=${callId}`);
-    return await this.appService.answerCall(callId);
+    return await this.callsService.answerCall(callId);
   }
 
   @Post('end')
@@ -83,8 +87,8 @@ export class CallsController {
     @Headers('authorization') authorization: string | undefined,
     @Body() body: { callId?: string },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -95,7 +99,7 @@ export class CallsController {
     }
 
     this.logger.log(`end callId=${callId}`);
-    const result = await this.appService.endCall(callId);
+    const result = await this.callsService.endCall(callId);
 
     // 비동기로 보호자에게 통화 완료 알림 전송
     this.notificationScheduler.notifyCallComplete(callId).catch((error) => {
@@ -110,8 +114,8 @@ export class CallsController {
     @Headers('authorization') authorization: string | undefined,
     @Param('callId') callId: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }

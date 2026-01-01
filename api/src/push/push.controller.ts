@@ -7,13 +7,19 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
+import { CallsService } from '../calls';
+import { AuthService } from '../auth';
+import { ConfigService } from '../core/config';
 
 @Controller('v1/push')
 export class PushController {
   private readonly logger = new Logger(PushController.name);
 
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly callsService: CallsService,
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   private summarizePayloadKeys(payload: Record<string, unknown> | undefined): string {
     if (!payload) return 'none';
@@ -34,8 +40,8 @@ export class PushController {
       env?: 'prod' | 'sandbox';
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -48,7 +54,7 @@ export class PushController {
     this.logger.log(
       `pushBroadcast type=${type} env=${body.env ?? 'default'} payloadKeys=${this.summarizePayloadKeys(body.payload)}`,
     );
-    return await this.appService.sendBroadcastPush({
+    return await this.callsService.sendBroadcastPush({
       type,
       title: body.title,
       body: body.body,
@@ -70,8 +76,8 @@ export class PushController {
       env?: 'prod' | 'sandbox';
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -89,7 +95,7 @@ export class PushController {
     this.logger.log(
       `pushUser identity=${identity} type=${type} env=${body.env ?? 'default'} payloadKeys=${this.summarizePayloadKeys(body.payload)}`,
     );
-    return await this.appService.sendUserPush({
+    return await this.callsService.sendUserPush({
       identity,
       type,
       title: body.title,

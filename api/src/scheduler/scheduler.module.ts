@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { NotificationScheduler } from './notification.scheduler';
-import { AppService } from '../app.service';
+import { CallsService } from '../calls/calls.service';
 
 /**
  * 스케줄러 모듈
@@ -10,7 +10,7 @@ import { AppService } from '../app.service';
  * - 미진행 통화 체크 (매시간)
  */
 @Module({
-  providers: [NotificationScheduler, AppService],
+  providers: [NotificationScheduler, CallsService],
   exports: [NotificationScheduler],
 })
 export class SchedulerModule {}

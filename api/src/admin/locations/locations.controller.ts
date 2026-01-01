@@ -10,7 +10,8 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../../app.service';
+import { ConfigService } from '../../core/config';
+import { AuthService } from '../../auth';
 import { DbService } from '../../database';
 
 @Controller('v1/admin/locations')
@@ -18,7 +19,8 @@ export class LocationsController {
   private readonly logger = new Logger(LocationsController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly configService: ConfigService,
+    private readonly authService: AuthService,
     private readonly dbService: DbService,
   ) {}
 
@@ -27,8 +29,8 @@ export class LocationsController {
     @Headers('authorization') authorization: string | undefined,
     @Query('organizationId') organizationId?: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -64,8 +66,8 @@ export class LocationsController {
     @Query('to') to?: string,
     @Query('limit') limit?: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -113,8 +115,8 @@ export class LocationsController {
     @Param('wardId') wardId: string,
     @Body() body: { status?: string },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }

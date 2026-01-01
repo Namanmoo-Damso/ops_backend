@@ -9,18 +9,22 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
+import { RtcTokenService } from './rtc-token.service';
 import { AuthService } from '../auth';
 import { DbService } from '../database';
+import { ConfigService } from '../core/config';
+import { CallsService } from '../calls';
 
 @Controller()
 export class RtcController {
   private readonly logger = new Logger(RtcController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly rtcTokenService: RtcTokenService,
     private readonly authService: AuthService,
     private readonly dbService: DbService,
+    private readonly configService: ConfigService,
+    private readonly callsService: CallsService,
   ) {}
 
   private normalizeLivekitUrl(url: string | undefined): string | undefined {
@@ -44,8 +48,8 @@ export class RtcController {
     @Headers('authorization') authorization: string | undefined,
     @Param('roomName') roomNameParam: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -55,7 +59,7 @@ export class RtcController {
       throw new HttpException('roomName is required', HttpStatus.BAD_REQUEST);
     }
 
-    const members = await this.appService.listRoomMembers(roomName);
+    const members = await this.callsService.listRoomMembers(roomName);
     this.logger.log(`listMembers room=${roomName} count=${members.length}`);
     return { roomName, members };
   }
@@ -76,7 +80,7 @@ export class RtcController {
       supportsCallKit?: boolean;
     },
   ) {
-    const config = this.appService.getConfig();
+    const config = this.configService.getConfig();
     const authHeader = authorization ?? '';
     const bearer = authHeader.startsWith('Bearer ')
       ? authHeader.slice('Bearer '.length)
@@ -95,7 +99,7 @@ export class RtcController {
         }
       } else {
         try {
-          const payload = this.appService.verifyApiToken(bearer);
+          const payload = this.authService.verifyApiToken(bearer);
           authIdentity = payload.identity;
           authName = payload.displayName;
         } catch {
@@ -135,7 +139,7 @@ export class RtcController {
       `issueToken room=${roomName} identity=${identity} role=${role} env=${body.env ?? 'default'} livekit=${livekitUrlOverride ?? 'default'} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
     );
 
-    const rtcData = await this.appService.issueRtcToken({
+    const rtcData = await this.rtcTokenService.issueToken({
       roomName,
       identity,
       name,

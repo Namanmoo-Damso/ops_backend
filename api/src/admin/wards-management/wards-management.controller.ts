@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { parse } from 'csv-parse/sync';
-import { AppService } from '../../app.service';
+import { ConfigService } from '../../core/config';
 import { AuthService } from '../../auth';
 import { DbService } from '../../database';
 
@@ -21,7 +21,7 @@ export class WardsManagementController {
   private readonly logger = new Logger(WardsManagementController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly configService: ConfigService,
     private readonly authService: AuthService,
     private readonly dbService: DbService,
   ) {}
@@ -38,8 +38,8 @@ export class WardsManagementController {
     @UploadedFile() file: Express.Multer.File,
     @Body() body: { organizationId?: string },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }

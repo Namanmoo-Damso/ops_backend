@@ -11,7 +11,9 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../../app.service';
+import { ConfigService } from '../../core/config';
+import { AuthService } from '../../auth';
+import { CallsService } from '../../calls';
 import { DbService } from '../../database';
 
 @Controller('v1/admin')
@@ -19,7 +21,9 @@ export class EmergenciesController {
   private readonly logger = new Logger(EmergenciesController.name);
 
   constructor(
-    private readonly appService: AppService,
+    private readonly configService: ConfigService,
+    private readonly authService: AuthService,
+    private readonly callsService: CallsService,
     private readonly dbService: DbService,
   ) {}
 
@@ -32,8 +36,8 @@ export class EmergenciesController {
       message?: string;
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -97,7 +101,7 @@ export class EmergenciesController {
       const wardInfo = await this.dbService.getWardWithGuardianInfo(wardId);
       if (wardInfo?.guardian_identity) {
         try {
-          await this.appService.sendUserPush({
+          await this.callsService.sendUserPush({
             identity: wardInfo.guardian_identity,
             type: 'alert',
             title: '🚨 비상 알림',
@@ -137,8 +141,8 @@ export class EmergenciesController {
     @Query('wardId') wardId?: string,
     @Query('limit') limit?: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -194,8 +198,8 @@ export class EmergenciesController {
     @Headers('authorization') authorization: string | undefined,
     @Param('id') emergencyId: string,
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -257,8 +261,8 @@ export class EmergenciesController {
       resolutionNote?: string;
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }

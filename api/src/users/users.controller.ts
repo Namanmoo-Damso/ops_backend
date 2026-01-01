@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { AuthService } from '../auth';
-import { AppService } from '../app.service';
+import { LiveKitService } from '../integration/livekit';
 import { DbService } from '../database';
 import { EventsService } from '../events';
 import { RegisterGuardianDto } from './dto';
@@ -23,7 +23,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly authService: AuthService,
-    private readonly appService: AppService,
+    private readonly livekitService: LiveKitService,
     private readonly dbService: DbService,
     private readonly eventsService: EventsService,
   ) {}
@@ -147,7 +147,7 @@ export class UsersController {
 
       // 2. LiveKit에서 강제 퇴장 (관제 페이지 목록에서 즉시 제거)
       if (user?.identity) {
-        await this.appService.removeParticipantFromAllRooms(user.identity);
+        await this.livekitService.removeParticipantFromAllRooms(user.identity);
 
         // SSE 이벤트 발행 (프론트엔드에서 목록 삭제)
         this.eventsService.emit({

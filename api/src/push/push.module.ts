@@ -6,8 +6,6 @@ import { PushService } from './push.service';
  *
  * APNs (VoIP/Alert) 푸시 알림 서비스를 제공합니다.
  * @Global() 데코레이터로 전역 모듈로 등록되어 다른 모듈에서 import 없이 사용 가능
- *
- * Note: PushController는 AppService 의존성으로 인해 AppModule에서 등록됨
  */
 @Global()
 @Module({

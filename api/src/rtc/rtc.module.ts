@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { RtcController } from './rtc.controller';
-import { AppService } from '../app.service';
-import { AuthService } from '../auth';
+import { RtcTokenService } from './rtc-token.service';
 
 @Module({
   controllers: [RtcController],
-  providers: [AppService, AuthService],
+  providers: [RtcTokenService],
+  exports: [RtcTokenService],
 })
 export class RtcModule {}

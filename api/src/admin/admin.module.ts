@@ -7,8 +7,8 @@ import { DashboardController } from './dashboard/dashboard.controller';
 import { WardsManagementController } from './wards-management/wards-management.controller';
 import { LocationsController } from './locations/locations.controller';
 import { EmergenciesController } from './emergencies/emergencies.controller';
-import { AppService } from '../app.service';
 import { AuthService } from '../auth';
+import { CallsService } from '../calls';
 
 @Module({
   imports: [
@@ -25,8 +25,8 @@ import { AuthService } from '../auth';
   ],
   providers: [
     AdminAuthService,
-    AppService,
     AuthService,
+    CallsService,
   ],
   exports: [AdminAuthService],
 })

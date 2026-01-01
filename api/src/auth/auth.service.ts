@@ -1,9 +1,28 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { DbService } from '../database';
 
 type UserType = 'guardian' | 'ward';
+
+// API Token types (for anonymous/legacy auth)
+export type ApiTokenResult = {
+  accessToken: string;
+  expiresAt: string;
+  user: {
+    id: string;
+    identity: string;
+    displayName: string;
+  };
+};
+
+export type ApiAuthContext = {
+  identity?: string;
+  displayName?: string;
+  userId?: string;
+  sub?: string;
+};
 
 type KakaoProfile = {
   kakaoId: string;
@@ -439,6 +458,55 @@ export class AuthService {
       };
     } catch {
       throw new UnauthorizedException('Invalid or expired admin access token');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // [API 토큰] - 익명/레거시 인증용
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private readonly apiJwtTtlSeconds = 60 * 60 * 24; // 24 hours
+
+  issueApiToken(identity: string, displayName: string): ApiTokenResult {
+    const userId = randomUUID();
+    const token = jwt.sign(
+      { sub: userId, identity, displayName },
+      this.jwtSecret,
+      { expiresIn: this.apiJwtTtlSeconds },
+    );
+    const expiresAt = new Date(
+      Date.now() + this.apiJwtTtlSeconds * 1000,
+    ).toISOString();
+
+    return {
+      accessToken: token,
+      expiresAt,
+      user: {
+        id: userId,
+        identity,
+        displayName,
+      },
+    };
+  }
+
+  verifyApiToken(token: string): ApiAuthContext {
+    const payload = jwt.verify(token, this.jwtSecret) as ApiAuthContext;
+    if (!payload.userId && payload.sub) {
+      payload.userId = payload.sub;
+    }
+    return payload;
+  }
+
+  getAuthContext(authorization?: string): ApiAuthContext | null {
+    if (!authorization) return null;
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length)
+      : '';
+    if (!token) return null;
+    try {
+      return this.verifyApiToken(token);
+    } catch {
+      return null;
     }
   }
 }

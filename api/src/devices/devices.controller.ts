@@ -7,13 +7,19 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { AppService } from '../app.service';
+import { DevicesService } from './devices.service';
+import { AuthService } from '../auth';
+import { ConfigService } from '../core/config';
 
 @Controller('v1/devices')
 export class DevicesController {
   private readonly logger = new Logger(DevicesController.name);
 
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly devicesService: DevicesService,
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   private summarizeToken(token: string | undefined): string {
     if (!token) return 'none';
@@ -36,8 +42,8 @@ export class DevicesController {
       supportsCallKit?: boolean;
     },
   ) {
-    const config = this.appService.getConfig();
-    const auth = this.appService.getAuthContext(authorization);
+    const config = this.configService.getConfig();
+    const auth = this.authService.getAuthContext(authorization);
     if (config.authRequired && !auth) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
@@ -60,7 +66,7 @@ export class DevicesController {
       this.logger.log(
         `registerDevice identity=${identity} platform=${platform} env=${env ?? 'default'} supportsCallKit=${supportsCallKit} apns=${this.summarizeToken(body.apnsToken)} voip=${this.summarizeToken(body.voipToken)}`,
       );
-      return await this.appService.registerDevice({
+      return await this.devicesService.registerDevice({
         identity,
         displayName,
         platform,
